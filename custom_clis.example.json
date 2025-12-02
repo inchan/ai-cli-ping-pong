@@ -1,0 +1,21 @@
+[
+  {
+    "name": "my-custom-cli",
+    "command": "/usr/local/bin/my-custom-cli-tool",
+    "extra_args": ["--some-flag", "value"],
+    "timeout": 120,
+    "env_vars": {
+      "MY_CLI_API_KEY": "YOUR_API_KEY_HERE"
+    },
+    "supports_skip_git_check": false,
+    "skip_git_check_position": "before_extra_args"
+  },
+  {
+    "name": "another-cli",
+    "command": "python",
+    "extra_args": ["-m", "another_cli_module"],
+    "env_vars": {
+      "ANOTHER_CLI_VAR": "some_value"
+    }
+  }
+]
