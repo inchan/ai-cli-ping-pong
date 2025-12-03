@@ -85,7 +85,7 @@ class TestListToolsHandler:
         send_msg_tool = next((t for t in tools if t.name == "send_message"), None)
 
         assert send_msg_tool is not None
-        assert send_msg_tool.description == "AI CLI에 메시지 전송 (동기 방식, 긴 작업 시 블로킹될 수 있음)"
+        assert send_msg_tool.description == "AI CLI에 메시지 전송 (동기 방식, 세션 모드 지원, 긴 작업 시 블로킹될 수 있음)"
 
         # inputSchema 검증
         schema = send_msg_tool.inputSchema
