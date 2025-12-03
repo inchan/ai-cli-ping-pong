@@ -3,9 +3,11 @@
 전역 fixture 및 테스트 설정
 """
 
+import asyncio
 import os
 import pytest
 from ai_cli_mcp.cli_registry import CLIRegistry
+from ai_cli_mcp.task_manager import get_task_manager, TaskManager
 
 
 @pytest.fixture(autouse=True)
@@ -43,3 +45,16 @@ def reset_cli_registry():
 
     if "CUSTOM_CLI_CONFIG" in os.environ:
         del os.environ["CUSTOM_CLI_CONFIG"]
+
+
+@pytest.fixture
+async def task_manager_fixture():
+    """각 테스트 전후로 TaskManager를 초기화하고 종료합니다."""
+    # 테스트 시작 전: TaskManager 초기화 및 시작
+    manager = get_task_manager()
+    await manager.start()
+    yield manager
+    # 테스트 종료 후: TaskManager 중지
+    await manager.stop()
+    # 싱글톤 인스턴스 초기화
+    TaskManager._task_manager_instance = None

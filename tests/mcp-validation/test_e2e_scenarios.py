@@ -23,7 +23,7 @@ class TestE2EBasicWorkflow:
         # Step 1: 도구 목록 조회
         tools = await list_tools()
 
-        assert len(tools) == 3  # list_available_clis, send_message, add_cli
+        assert len(tools) == 5  # list_available_clis, send_message, start_send_message, get_task_status, add_cli
         tool_names = {tool.name for tool in tools}
         assert "list_available_clis" in tool_names
         assert "send_message" in tool_names
@@ -319,7 +319,7 @@ class TestE2EIntegration:
         """시나리오: 전체 사용자 여정"""
         # 1. 사용 가능한 도구 확인
         tools = await list_tools()
-        assert len(tools) == 3  # list_available_clis, send_message, add_cli
+        assert len(tools) == 5  # list_available_clis, send_message, start_send_message, get_task_status, add_cli
 
         # 2. CLI 목록 조회
         clis_result = await call_tool("list_available_clis", {})

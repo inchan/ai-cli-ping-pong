@@ -168,7 +168,7 @@ class TestSendMessageTool:
 
         assert "response" in result
         assert result["response"] == "CLI response"
-        mock_execute.assert_called_once_with("claude", "Hello", False, None)
+        mock_execute.assert_called_once_with("claude", "Hello", True, None, [], None)
 
     @pytest.mark.asyncio
     @patch('ai_cli_mcp.server.execute_cli_file_based')  # server.py에서 import한 것을 패치

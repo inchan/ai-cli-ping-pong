@@ -39,7 +39,8 @@ def execute_cli_file_based(
     message: str,
     skip_git_repo_check: bool = True,
     system_prompt: str = None,
-    args: list[str] = None
+    args: list[str] = None,
+    timeout: int = None
 ) -> str:
     """
     파일 기반 CLI 실행 (시스템 프롬프트 및 args 지원)
@@ -58,12 +59,13 @@ def execute_cli_file_based(
                       - Claude: --append-system-prompt 플래그로 처리
                       - 나머지: YAML 형식으로 input에 포함
         args: 추가 CLI 인자 (선택사항). 각 CLI가 지원하는 옵션만 전달됨
+        timeout: 실행 타임아웃 (초, 선택사항). 제공 시 CLI 기본 설정을 덮어씀
 
     Returns:
         CLI 응답 문자열
 
     Raises:
-        CLINotFoundError: CLI가 설치되지 않음
+        CLINotFoundError: CLI가 설치되지 않았을 때 발생
         CLITimeoutError: 실행 타임아웃
         CLIExecutionError: 실행 중 에러 발생
     """
@@ -79,7 +81,8 @@ def execute_cli_file_based(
 
     config = all_clis[cli_name]
     command = config["command"]
-    timeout = config["timeout"]
+    # 요청별 타임아웃이 있으면 우선 사용, 없으면 설정값 사용
+    execution_timeout = timeout if timeout is not None else config["timeout"]
 
     # 2. args 검증 및 필터링 (각 CLI별 지원 옵션 확인)
     validated_args = _validate_and_filter_args(cli_name, args, config)
@@ -130,7 +133,7 @@ def execute_cli_file_based(
             env_vars=config.get("env_vars", {}),
             input_path=input_path,
             output_path=output_path,
-            timeout=timeout,
+            timeout=execution_timeout,
             skip_git_repo_check=skip_git_repo_check,
             supports_skip_git_check=config.get("supports_skip_git_check", False),
             skip_git_check_position=config.get("skip_git_check_position", "before_extra_args"),

@@ -2,7 +2,7 @@
 
 **프로젝트**: AI CLI Ping-Pong MCP Server
 **버전**: 0.1.0
-**업데이트**: 2025-11-30
+**업데이트**: 2025-12-03
 
 ---
 
@@ -602,6 +602,78 @@ def get_cli_version(command: str) -> Optional[str]:
 - [ ] 에러 모니터링 설정
 - [ ] 백업 계획 수립
 - [ ] 롤백 계획 수립
+
+---
+
+## Part 10: 비동기 워크플로우 활용 (Leveraging Asynchronous Workflow)
+
+`send_message`는 간단하지만, 응답이 올 때까지 클라이언트를 차단합니다. 코드 생성이나 데이터 분석처럼 몇 분씩 걸릴 수 있는 긴 작업을 처리하기 위해, 비동기 워크플로우를 사용하는 것이 강력히 권장됩니다.
+
+**핵심 흐름**:
+1.  `start_send_message`를 호출하여 작업을 시작하고 즉시 `task_id`를 받습니다.
+2.  `get_task_status`를 주기적으로 호출(polling)하여 작업 상태를 확인합니다.
+3.  상태가 `completed` 또는 `failed`가 되면 폴링을 멈추고 결과를 처리합니다.
+
+### Python 클라이언트 비동기 예제
+
+```python
+import asyncio
+import time
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+async def main():
+    server_params = StdioServerParameters(
+        command="/Users/chans/workspace/pilot/ai-cli-ping-pong/venv/bin/python",
+        args=["-m", "ai_cli_mcp.server"]
+    )
+
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            # 1. 비동기 작업 시작
+            print("Starting a long-running task...")
+            start_result = await session.call_tool(
+                "start_send_message",
+                {
+                    "cli_name": "claude",
+                    "message": "Analyze the provided data and generate a 300-line summary report."
+                }
+            )
+            task_id = start_result.get("task_id")
+            if not task_id:
+                print(f"Failed to start task: {start_result}")
+                return
+
+            print(f"Task started with ID: {task_id}")
+
+            # 2. 작업 완료까지 상태 폴링
+            while True:
+                status_result = await session.call_tool(
+                    "get_task_status",
+                    {"task_id": task_id}
+                )
+                
+                status = status_result.get("status")
+                if status == "completed":
+                    print("\nTask completed successfully!")
+                    print("Result:", status_result.get("result"))
+                    break
+                elif status == "failed":
+                    print(f"\nTask failed: {status_result.get('error')}")
+                    break
+                elif status == "running":
+                    elapsed = status_result.get('elapsed_time', 0)
+                    print(f"Task is still running... ({elapsed:.2f}s elapsed)", end="\r")
+                    await asyncio.sleep(5) # 5초마다 확인
+                else:
+                    print(f"\nUnknown status: {status}")
+                    break
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
 
 ---
 

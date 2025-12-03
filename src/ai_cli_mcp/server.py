@@ -6,7 +6,7 @@ AI CLI Ping-Pong MCP 서버 진입점
 import asyncio
 import sys
 from dataclasses import asdict
-from typing import Any, Dict
+from typing import Any, Dict, AsyncGenerator
 
 # MCP SDK import
 from mcp.server import Server
@@ -14,8 +14,9 @@ from mcp.server.stdio import stdio_server
 
 from .cli_manager import list_available_clis
 from .cli_registry import get_cli_registry
-from .file_handler import execute_cli_file_based, CLINotFoundError, CLIExecutionError, CLITimeoutError
+from .file_handler import CLINotFoundError, CLIExecutionError, CLITimeoutError, execute_cli_file_based
 from .logger import get_logger
+from .task_manager import get_task_manager, TaskManager
 
 logger = get_logger(__name__)
 
@@ -23,6 +24,19 @@ logger = get_logger(__name__)
 # MCP Server 인스턴스 생성
 app = Server("ai-cli-mcp")
 
+
+@app.lifespan
+async def lifespan(app: Server) -> AsyncGenerator[Dict[str, Any], None]:
+    """서버 생명주기 동안 TaskManager를 관리합니다."""
+    logger.info("서버 시작... TaskManager를 초기화하고 시작합니다.")
+    task_manager = get_task_manager()
+    await task_manager.start()
+    
+    yield {}
+    
+    logger.info("서버 종료... TaskManager를 중지합니다.")
+    await task_manager.stop()
+    
 
 @app.list_tools()
 async def list_tools():
@@ -40,7 +54,7 @@ async def list_tools():
         ),
         Tool(
             name="send_message",
-            description="AI CLI에 메시지 전송 (파일 기반, 시스템 프롬프트 및 args 지원)",
+            description="AI CLI에 메시지 전송 (동기 방식, 긴 작업 시 블로킹될 수 있음)",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -64,9 +78,62 @@ async def list_tools():
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "추가 CLI 인자 (선택사항). 각 CLI가 지원하는 옵션만 전달되며, 지원하지 않는 옵션은 로그에 기록되고 무시됨"
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "타임아웃 초 (선택사항, 기본값: 300)"
                     }
                 },
                 "required": ["cli_name", "message"]
+            }
+        ),
+        Tool(
+            name="start_send_message",
+            description="AI CLI에 메시지 전송 시작 (비동기 방식). task_id를 즉시 반환.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "cli_name": {
+                        "type": "string",
+                        "description": "CLI 이름"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "전송할 프롬프트"
+                    },
+                    "system_prompt": {
+                        "type": "string",
+                        "description": "시스템 프롬프트 (선택사항)"
+                    },
+                    "skip_git_repo_check": {
+                        "type": "boolean",
+                        "description": "Git 저장소 체크 건너뛰기 (기본값: true)"
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "추가 CLI 인자 (선택사항)"
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "타임아웃 초 (선택사항, 기본값: 300)"
+                    }
+                },
+                "required": ["cli_name", "message"]
+            }
+        ),
+        Tool(
+            name="get_task_status",
+            description="비동기 작업의 상태 및 결과를 조회합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "start_send_message로부터 받은 작업 ID"
+                    }
+                },
+                "required": ["task_id"]
             }
         ),
         Tool(
@@ -90,7 +157,7 @@ async def list_tools():
                     },
                     "timeout": {
                         "type": "number",
-                        "description": "타임아웃 초 (선택, 기본값: 60)"
+                        "description": "타임아웃 초 (선택, 기본값: 300)"
                     },
                     "env_vars": {
                         "type": "object",
@@ -131,11 +198,12 @@ async def call_tool(name: str, arguments: Dict[str, Any]):
         system_prompt = arguments.get("system_prompt", None)
         skip_git_repo_check = arguments.get("skip_git_repo_check", True)
         args = arguments.get("args", [])
+        timeout = arguments.get("timeout", None)
 
         try:
-            # 비동기로 실행하여 블로킹 방지
+            # 동기 방식: 여기서 작업이 끝날 때까지 대기
             response = await asyncio.to_thread(
-                execute_cli_file_based, cli_name, message, skip_git_repo_check, system_prompt, args
+                execute_cli_file_based, cli_name, message, skip_git_repo_check, system_prompt, args, timeout
             )
             return {"response": response}
         except CLINotFoundError as e:
@@ -148,6 +216,32 @@ async def call_tool(name: str, arguments: Dict[str, Any]):
             logger.error(f"CLI execution error: {e}")
             return {"error": str(e), "type": "CLIExecutionError"}
 
+    elif name == "start_send_message":
+        # 비동기 방식: TaskManager에 작업을 등록하고 task_id를 즉시 반환
+        task_manager = get_task_manager()
+        
+        # 실제 실행할 코루틴(또는 함수)을 준비
+        # functools.partial을 사용하여 나중에 실행될 함수와 인자를 묶음
+        import functools
+        coro = functools.partial(
+            execute_cli_file_based,
+            cli_name=arguments["cli_name"],
+            message=arguments["message"],
+            skip_git_repo_check=arguments.get("skip_git_repo_check", True),
+            system_prompt=arguments.get("system_prompt", None),
+            args=arguments.get("args", []),
+            timeout=arguments.get("timeout", None)
+        )
+        
+        task_id = await task_manager.start_task(coro)
+        return {"task_id": task_id}
+
+    elif name == "get_task_status":
+        task_id = arguments["task_id"]
+        task_manager = get_task_manager()
+        status = await task_manager.get_task_status(task_id)
+        return status
+        
     elif name == "add_cli":
         # 필수 필드
         cli_name = arguments["name"]

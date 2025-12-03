@@ -4,13 +4,13 @@ MCP (Model Context Protocol) 서버로 로컬에 설치된 AI CLI 도구들과 *
 
 ## ✨ Features
 
-- ✅ **list_available_clis**: 설치된 AI CLI 도구 목록 조회
-- ✅ **send_message**: AI CLI에 메시지 보내고 응답 받기
-- ✅ **skip_git_repo_check**: Codex CLI Git 저장소 체크 스킵 (선택)
-- ✅ **환경 변수 지원**: Qwen 등 API 키가 필요한 CLI 지원
-- ✅ **로깅 시스템**: 디버깅 및 모니터링 용이
-- ✅ **파일 기반 통신**: Stateless 세션으로 안전한 실행
-- ✅ **MCP 서버 통합**: MCP SDK 1.22.0 설치 완료
+- ✅ **비동기 작업 실행**: `start_send_message`와 `get_task_status`를 통해 긴 작업을 백그라운드에서 처리
+- ✅ **영속적 작업 저장소**: SQLite를 사용하여 서버가 재시작되어도 작업 상태 유지 (선택 사항)
+- ✅ **다양한 CLI 지원**: Claude, Gemini, Codex, Qwen 등 주요 AI 코딩 CLI 도구 지원
+- ✅ **동적 CLI 추가**: `add_cli`를 통해 런타임에 새로운 CLI 동적으로 추가
+- ✅ **안전한 파일 기반 통신**: Stateless 세션을 통해 안전한 CLI 실행 보장
+- ✅ **상세 로깅 시스템**: 디버깅 및 모니터링 용이
+- ✅ **MCP 서버 통합**: MCP SDK 1.22.0과 완벽 호환
 
 ## 📋 Supported CLIs
 
@@ -117,6 +117,9 @@ MCP Server (ai_cli_mcp)
 AI CLI (claude, gemini, codex, qwen)
 ```
 
+자세한 내용은 다음 문서를 참조하세요:
+- [**비동기 작업 실행 아키텍처 (Asynchronous Task Execution Architecture)**](./docs/ASYNC_TASK_ARCHITECTURE.md)
+
 ## 📚 Documentation
 
 ### Development Artifacts
@@ -141,6 +144,23 @@ Development artifacts (plans, reports, analysis) are stored locally in the `.art
 - `PHASE3_COMPLETION_REPORT.md` - 행동 테스트 완료
 - `MANUAL_TESTING_CHECKLIST.md` - MCP Inspector 수동 테스트 가이드
 - `validation_metrics.json` - 메트릭 데이터
+
+## ⚙️ Configuration
+
+### 저장소 유형 (Storage Type)
+`TaskManager`가 작업 상태를 저장하는 방식을 설정할 수 있습니다.
+
+- **`memory` (기본값)**: 작업을 인-메모리에 저장합니다. 서버 재시작 시 모든 작업 내역이 사라집니다.
+- **`sqlite`**: 작업을 SQLite 데이터베이스 파일(`.data/tasks.db`)에 영속적으로 저장합니다. 서버가 재시작되어도 작업 내역이 유지됩니다.
+
+**설정 방법**:
+`MCP_STORAGE_TYPE` 환경 변수를 사용하여 저장소 유형을 지정합니다.
+
+```bash
+# SQLite 저장소를 사용하려면 서버 실행 전 환경 변수를 설정합니다.
+export MCP_STORAGE_TYPE=sqlite
+python -m ai_cli_mcp.server
+```
 
 ## Usage
 
@@ -169,11 +189,11 @@ Development artifacts (plans, reports, analysis) are stored locally in the `.art
 }
 ```
 
-### Tools
+### Available Tools (MCP)
 
-#### list_available_clis
+#### `list_available_clis`
 
-설치된 CLI 도구 목록을 반환합니다.
+서버에 설정된 CLI 도구 목록과 설치 상태를 반환합니다.
 
 ```json
 {
@@ -181,25 +201,10 @@ Development artifacts (plans, reports, analysis) are stored locally in the `.art
 }
 ```
 
-Response:
-```json
-{
-  "clis": [
-    {
-      "name": "claude",
-      "command": "claude",
-      "version": "1.0.0",
-      "installed": true
-    }
-  ]
-}
-```
+#### `send_message`
 
-#### send_message
+AI CLI에 메시지를 보내고 응답이 올 때까지 대기하는 **동기(Synchronous)** 방식입니다. 간단하고 빠른 작업에 적합합니다.
 
-CLI에 메시지를 보내고 응답을 받습니다.
-
-**기본 사용법**:
 ```json
 {
   "name": "send_message",
@@ -210,22 +215,43 @@ CLI에 메시지를 보내고 응답을 받습니다.
 }
 ```
 
-**Codex with skip_git_check**:
+#### `start_send_message`
+
+긴 작업에 권장되는 **비동기(Asynchronous)** 방식입니다. 작업을 백그라운드에서 시작하고 즉시 `task_id`를 반환합니다.
+
 ```json
 {
-  "name": "send_message",
+  "name": "start_send_message",
   "arguments": {
-    "cli_name": "codex",
-    "message": "Write a hello world function",
-    "skip_git_repo_check": true
+    "cli_name": "claude",
+    "message": "Write a python script that analyzes a large CSV file."
   }
 }
 ```
 
-Response:
+#### `get_task_status`
+
+`start_send_message`로 시작된 비동기 작업의 상태를 조회합니다. 작업이 완료될 때까지 주기적으로 호출(polling)해야 합니다.
+
 ```json
 {
-  "response": "def hello():\n    print('Hello, World!')"
+  "name": "get_task_status",
+  "arguments": {
+    "task_id": "<your-task-id>"
+  }
+}
+```
+
+#### `add_cli`
+런타임에 새로운 AI CLI 설정을 동적으로 추가합니다.
+
+```json
+{
+  "name": "add_cli",
+  "arguments": {
+    "name": "my-custom-cli",
+    "command": "my-cli-command"
+  }
 }
 ```
 

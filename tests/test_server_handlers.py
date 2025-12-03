@@ -5,6 +5,7 @@ Priority 1 테스트: server.py의 비동기 핸들러 및 도구 실행 로직
 
 import asyncio
 import pytest
+import time
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from ai_cli_mcp.server import app, call_tool
@@ -13,6 +14,7 @@ from ai_cli_mcp.file_handler import (
     CLITimeoutError,
     CLIExecutionError,
 )
+from ai_cli_mcp.task_manager import TaskManager, get_task_manager, InMemoryStorage, TaskStatus # type: ignore
 
 
 class TestCallToolListAvailableCLIs:
@@ -185,7 +187,152 @@ class TestCallToolSendMessage:
             assert "response" in result or "error" in result
 
 
-class TestCallToolAddCLI:
+class TestCallToolAsyncHandlers:
+    """start_send_message 및 get_task_status 도구 핸들러 테스트"""
+
+    @pytest.fixture(autouse=True)
+    async def setup_task_manager(self):
+        """각 테스트 전에 TaskManager를 초기화하고, 테스트 후에 정리합니다."""
+        # TaskManager 싱글톤 인스턴스를 강제로 초기화
+        TaskManager._task_manager_instance = None
+        manager = get_task_manager()
+        # 모든 작업을 지우고 새로 시작하도록 함
+        manager.storage = InMemoryStorage()
+        await manager.start() # 모니터 태스크 시작
+        yield manager
+        # 테스트 후 TaskManager 정리
+        await manager.stop() # 모니터 태스크 중지
+        TaskManager._task_manager_instance = None
+
+
+    @pytest.mark.asyncio
+    async def test_start_send_message_success_and_running_status(self, setup_task_manager):
+        """start_send_message 성공 및 running 상태 확인"""
+        cli_name = "claude"
+        message = "Async message"
+        expected_response = "Async CLI response"
+
+        # execute_cli_file_based를 모의하여 비동기로 동작하도록 설정
+        mock_cli_execution = MagicMock(return_value=expected_response)
+
+        with patch("ai_cli_mcp.server.execute_cli_file_based", new=mock_cli_execution):
+            # 1. start_send_message 호출
+            start_result = await call_tool("start_send_message", {
+                "cli_name": cli_name,
+                "message": message,
+            })
+
+            assert "task_id" in start_result
+            task_id = start_result["task_id"]
+
+            # 2. 즉시 get_task_status 호출하여 running 상태 확인
+            status_result_running = await call_tool("get_task_status", {"task_id": task_id})
+            assert status_result_running["status"] == "running"
+            assert "elapsed_time" in status_result_running
+            assert status_result_running["elapsed_time"] >= 0
+
+            # 3. 작업 완료까지 잠시 대기 (mock_cli_execution이 비동기로 완료될 시간을 줌)
+            await asyncio.sleep(0.1)
+            # mock_cli_execution이 호출되었는지 확인
+            mock_cli_execution.assert_called_once_with(
+                cli_name=cli_name,
+                message=message,
+                skip_git_repo_check=True, # 기본값
+                system_prompt=None, # 기본값
+                args=[], # 기본값
+                timeout=None # 기본값
+            )
+
+            # 4. 완료 후 get_task_status 호출하여 completed 상태 및 결과 확인
+            status_result_completed = await call_tool("get_task_status", {"task_id": task_id})
+            assert status_result_completed["status"] == "completed"
+            assert status_result_completed["result"] == expected_response
+            assert "elapsed_time" not in status_result_completed # 완료 후에는 elapsed_time이 없음
+
+    @pytest.mark.asyncio
+    async def test_start_send_message_failure_status(self, setup_task_manager):
+        """start_send_message 실패 및 failed 상태 확인"""
+        cli_name = "claude"
+        message = "Failing message"
+        expected_error = "CLI execution failed for some reason"
+
+        # execute_cli_file_based를 모의하여 예외를 발생시키도록 설정
+        mock_cli_execution = MagicMock(side_effect=CLIExecutionError(expected_error))
+
+        with patch("ai_cli_mcp.server.execute_cli_file_based", new=mock_cli_execution):
+            # 1. start_send_message 호출
+            start_result = await call_tool("start_send_message", {
+                "cli_name": cli_name,
+                "message": message,
+            })
+
+            assert "task_id" in start_result
+            task_id = start_result["task_id"]
+
+            # 2. 작업 완료까지 잠시 대기 (mock_cli_execution이 비동기로 실패할 시간을 줌)
+            await asyncio.sleep(0.1)
+            mock_cli_execution.assert_called_once()
+
+            # 3. 완료 후 get_task_status 호출하여 failed 상태 및 에러 메시지 확인
+            status_result_failed = await call_tool("get_task_status", {"task_id": task_id})
+            assert status_result_failed["status"] == "failed"
+            assert status_result_failed["error"] == expected_error
+            assert "elapsed_time" not in status_result_failed
+
+    @pytest.mark.asyncio
+    async def test_get_task_status_not_found(self, setup_task_manager):
+        """존재하지 않는 task_id에 대한 get_task_status"""
+        task_id = "non-existent-task-id"
+        status_result = await call_tool("get_task_status", {"task_id": task_id})
+
+        assert status_result["status"] == "not_found"
+        assert "error" in status_result
+        assert "Task ID not found" in status_result["error"]
+        assert "elapsed_time" not in status_result
+
+    @pytest.mark.asyncio
+    async def test_start_send_message_with_all_args(self, setup_task_manager):
+        """start_send_message의 모든 인자 전달 확인"""
+        cli_name = "gemini"
+        message = "Message with args"
+        system_prompt = "You are a helpful assistant."
+        skip_git_repo_check = False
+        args = ["--model", "gemini-pro"]
+        timeout = 120
+        expected_response = "Response from gemini-pro"
+
+        mock_cli_execution = MagicMock(return_value=expected_response)
+
+        with patch("ai_cli_mcp.server.execute_cli_file_based", new=mock_cli_execution):
+            start_result = await call_tool("start_send_message", {
+                "cli_name": cli_name,
+                "message": message,
+                "system_prompt": system_prompt,
+                "skip_git_repo_check": skip_git_repo_check,
+                "args": args,
+                "timeout": timeout
+            })
+
+            assert "task_id" in start_result
+            task_id = start_result["task_id"]
+
+            await asyncio.sleep(0.1) # allow task to complete
+
+            mock_cli_execution.assert_called_once_with(
+                cli_name=cli_name,
+                message=message,
+                skip_git_repo_check=skip_git_repo_check,
+                system_prompt=system_prompt,
+                args=args,
+                timeout=timeout
+            )
+
+            status_result = await call_tool("get_task_status", {"task_id": task_id})
+            assert status_result["status"] == "completed"
+            assert status_result["result"] == expected_response
+
+
+
     """add_cli 도구 핸들러 테스트"""
 
     @pytest.mark.asyncio

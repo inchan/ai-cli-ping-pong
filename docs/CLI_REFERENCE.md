@@ -198,40 +198,127 @@ MCP 도구(`send_message`)를 통해 자동으로 처리됩니다.
 **추정 정보 (참고용)**:
 - ⚠️ File-Based Usage 섹션 (실제 MCP 서버에서 사용하지 않음)
 
-### MCP 서버를 통한 실제 사용법
+> **Last Updated:** 2025-12-03
+> **Purpose:** 지원되는 AI CLI 도구들의 명령어, 설치 방법, 사용법 레퍼런스
 
-본 MCP 서버를 사용할 때는 다음과 같이 MCP 도구를 호출합니다:
+---
 
-**기본 사용법**:
-```json
-{
-  "name": "send_message",
-  "arguments": {
-    "cli_name": "claude",
-    "message": "Write a hello world function"
-  }
-}
-```
+## Supported CLI Tools
 
-**CLI별 특이사항**:
+| CLI | Command | NPM Package | Default Model | Status |
+|-----|---------|-------------|---------------|--------|
+| Claude Code | `claude` | `@anthropic-ai/claude-code` | Sonnet 4.5 | ✅ Active |
+| Gemini CLI | `gemini` | `@google/gemini-cli` | Gemini 2.5 Pro | ✅ Active |
+| Codex CLI | `codex` | `@openai/codex` | GPT-5-Codex | ✅ Active |
+| Qwen Code | `qwen` | `@qwen-code/qwen-code` | Qwen3-Coder-480B | ✅ Active |
 
-- **Codex**: `skip_git_repo_check` 파라미터 지원
-  ```json
-  {
-    "name": "send_message",
-    "arguments": {
-      "cli_name": "codex",
-      "message": "Write a hello world function",
-      "skip_git_repo_check": true
+---
+... (Sections 1-4 remain unchanged) ...
+---
+## 4. Qwen Code CLI
+...
+### References
+- [Official Blog Post](https://qwenlm.github.io/blog/qwen3-coder/)
+- [Community GitHub](https://github.com/dinoanderson/qwen_cli_coder)
+- [Tutorial](https://www.datacamp.com/tutorial/qwen-code)
+
+---
+## MCP Server Tools
+
+본 MCP 서버는 AI CLI와의 상호작용을 표준화하고 추상화하는 여러 도구를 제공합니다.
+
+### 1. `list_available_clis`
+서버에 설정된 모든 AI CLI의 목록과 설치 상태, 버전 등의 정보를 조회합니다.
+
+**Arguments**: 없음
+**Returns**: `{"clis": [...]}`
+
+### 2. `send_message`
+AI CLI에 프롬프트를 보내고 응답이 올 때까지 기다리는 **동기 방식** 도구입니다. 간단한 작업에 적합하지만, 긴 작업 시에는 클라이언트가 차단(blocking)될 수 있습니다.
+
+**Arguments**:
+- `cli_name` (string, required): `list_available_clis`로 조회된 CLI 이름
+- `message` (string, required): 전송할 프롬프트
+- `system_prompt` (string, optional): 시스템 프롬프트
+- `skip_git_repo_check` (boolean, optional): Git 저장소 체크 건너뛰기 (Codex 등 일부 CLI만 지원)
+- `args` (array, optional): CLI에 전달할 추가 인자
+- `timeout` (number, optional): 타임아웃 (초, 기본값: 300)
+
+**Returns**: `{"response": "..."}`
+
+### 3. `start_send_message`
+AI CLI에 프롬프트를 보내는 **비동기 방식** 작업(task)을 시작합니다. 즉시 `task_id`를 반환하며, 클라이언트는 이 ID를 사용해 작업 상태를 별도로 조회해야 합니다. 긴 시간이 소요되는 작업에 권장됩니다.
+
+**Arguments**: `send_message`와 동일
+**Returns**: `{"task_id": "..."}`
+
+### 4. `get_task_status`
+`start_send_message`로 시작된 비동기 작업의 현재 상태를 조회합니다.
+
+**Arguments**:
+- `task_id` (string, required): 조회할 작업의 ID
+
+**Returns**:
+- **작업 진행 중**: `{"status": "running", "elapsed_time": ...}`
+- **작업 완료**: `{"status": "completed", "result": "..."}`
+- **작업 실패**: `{"status": "failed", "error": "..."}`
+- **작업 없음**: `{"status": "not_found", "error": "..."}`
+
+### 5. `add_cli`
+런타임에 새로운 AI CLI 설정을 동적으로 추가합니다.
+
+**Arguments**:
+- `name` (string, required): CLI 이름
+- `command` (string, required): 실행 명령어
+- ... (기타 설정 옵션)
+
+
+### 비동기 작업 워크플로우 예시
+긴 코드 생성 작업을 비동기적으로 처리하는 방법입니다.
+
+1.  **작업 시작 (`start_send_message`)**
+    ```json
+    {
+      "name": "start_send_message",
+      "arguments": {
+        "cli_name": "claude",
+        "message": "Implement a class for a task management system in Python using SQLite for persistence."
+      }
     }
-  }
-  ```
+    ```
+    서버는 즉시 다음과 같이 응답합니다:
+    ```json
+    {
+      "task_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef"
+    }
+    ```
 
-- **Qwen**: 환경 변수 필요 (MCP 서버 설정에서 자동 처리)
-  - `OPENAI_BASE_URL`: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-  - `OPENAI_MODEL`: qwen3-coder-plus
+2.  **상태 확인 (`get_task_status`)**
+    클라이언트는 `task_id`를 사용하여 작업이 끝날 때까지 주기적으로 상태를 확인(polling)합니다.
+    ```json
+    {
+      "name": "get_task_status",
+      "arguments": {
+        "task_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef"
+      }
+    }
+    ```
+    작업이 아직 진행 중이라면 서버는 다음과 같이 응답합니다:
+    ```json
+    {
+      "status": "running",
+      "elapsed_time": 45.7
+    }
+    ```
 
-자세한 통합 방법은 [`INTEGRATION_GUIDE.md`](./INTEGRATION_GUIDE.md)를 참조하세요.
+3.  **결과 수신**
+    작업이 완료되면, `get_task_status` 호출은 다음과 같은 최종 결과를 반환합니다.
+    ```json
+    {
+      "status": "completed",
+      "result": "class TaskManager:\n  # ... (생성된 코드) ..."
+    }
+    ```
 
 ---
 
@@ -239,4 +326,5 @@ MCP 도구(`send_message`)를 통해 자동으로 처리됩니다.
 
 | Date | Version | Changes |
 |------|---------|---------|
+| 2025-12-03 | 1.1.0 | 비동기 작업 도구(`start_send_message`, `get_task_status`) 추가 및 문서 개편 |
 | 2025-11-30 | 1.0.0 | 초기 레퍼런스 작성 (웹 검색 기반) |
