@@ -5,6 +5,7 @@ AI CLI Ping-Pong MCP 서버 진입점
 
 import asyncio
 import sys
+import functools
 from dataclasses import asdict
 from typing import Any, Dict, AsyncGenerator
 
@@ -45,13 +46,13 @@ async def lifespan(app: Server) -> AsyncGenerator[Dict[str, Any], None]:
     
 
 @app.list_tools()
-async def list_tools():
+async def list_available_tools():
     """도구 목록 반환"""
     from mcp.types import Tool
 
     return [
         Tool(
-            name="list_available_clis",
+            name="list_tools",
             description="설치된 AI CLI 목록 조회",
             inputSchema={
                 "type": "object",
@@ -59,8 +60,8 @@ async def list_tools():
             }
         ),
         Tool(
-            name="send_message",
-            description="AI CLI에 메시지 전송 (동기 방식, 세션 모드 지원, 긴 작업 시 블로킹될 수 있음)",
+            name="run_tool",
+            description="AI CLI 도구 실행 (동기 또는 비동기 방식)",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -71,6 +72,10 @@ async def list_tools():
                     "message": {
                         "type": "string",
                         "description": "전송할 프롬프트"
+                    },
+                    "run_async": {
+                        "type": "boolean",
+                        "description": "비동기 실행 여부. true면 즉시 task_id 반환 (기본값: false)"
                     },
                     "session_id": {
                         "type": "string",
@@ -102,57 +107,22 @@ async def list_tools():
             }
         ),
         Tool(
-            name="start_send_message",
-            description="AI CLI에 메시지 전송 시작 (비동기 방식). task_id를 즉시 반환.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "cli_name": {
-                        "type": "string",
-                        "description": "CLI 이름"
-                    },
-                    "message": {
-                        "type": "string",
-                        "description": "전송할 프롬프트"
-                    },
-                    "system_prompt": {
-                        "type": "string",
-                        "description": "시스템 프롬프트 (선택사항)"
-                    },
-                    "skip_git_repo_check": {
-                        "type": "boolean",
-                        "description": "Git 저장소 체크 건너뛰기 (기본값: true)"
-                    },
-                    "args": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "추가 CLI 인자 (선택사항)"
-                    },
-                    "timeout": {
-                        "type": "number",
-                        "description": "타임아웃 초 (선택사항, 기본값: 300)"
-                    }
-                },
-                "required": ["cli_name", "message"]
-            }
-        ),
-        Tool(
-            name="get_task_status",
-            description="비동기 작업의 상태 및 결과를 조회합니다.",
+            name="get_run_status",
+            description="비동기 실행(run_tool run_async=true)의 상태 및 결과를 조회합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "task_id": {
                         "type": "string",
-                        "description": "start_send_message로부터 받은 작업 ID"
+                        "description": "run_tool로부터 받은 작업 ID"
                     }
                 },
                 "required": ["task_id"]
             }
         ),
         Tool(
-            name="add_cli",
-            description="동적으로 새로운 AI CLI 추가 (런타임)",
+            name="add_tool",
+            description="동적으로 새로운 AI CLI 도구 추가 (런타임)",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -201,14 +171,15 @@ async def list_tools():
 @app.call_tool()
 async def call_tool(name: str, arguments: Dict[str, Any]):
     """도구 실행 (비동기 처리 개선)"""
-    if name == "list_available_clis":
+    if name == "list_tools":
         # 비동기로 실행하여 블로킹 방지
         clis = await asyncio.to_thread(list_available_clis)
         return {"clis": [asdict(cli) for cli in clis]}
 
-    elif name == "send_message":
+    elif name == "run_tool":
         cli_name = arguments["cli_name"]
         message = arguments["message"]
+        run_async = arguments.get("run_async", False)
         session_id = arguments.get("session_id", None)
         resume = arguments.get("resume", False)
         system_prompt = arguments.get("system_prompt", None)
@@ -216,65 +187,58 @@ async def call_tool(name: str, arguments: Dict[str, Any]):
         args = arguments.get("args", [])
         timeout = arguments.get("timeout", None)
 
-        try:
-            # 모드 자동 선택: session_id 있으면 세션 모드, 없으면 stateless 모드
-            if session_id:
-                # Session 모드
-                logger.info(f"Session mode: {session_id} (resume: {resume})")
-                response = await asyncio.to_thread(
-                    execute_with_session,
-                    cli_name, message, session_id, resume,
-                    skip_git_repo_check, system_prompt, args, timeout
-                )
-            else:
-                # Stateless 모드 (기존 방식)
-                logger.info("Stateless mode")
-                response = await asyncio.to_thread(
-                    execute_cli_file_based,
-                    cli_name, message, skip_git_repo_check, system_prompt, args, timeout
-                )
-            return {"response": response}
-        except ValueError as e:
-            # 세션 ID 검증 실패 또는 세션 제한 초과
-            logger.error(f"Session validation error: {e}")
-            return {"error": str(e), "type": "SessionValidationError"}
-        except CLINotFoundError as e:
-            logger.error(f"CLI not found: {e}")
-            return {"error": str(e), "type": "CLINotFoundError"}
-        except CLITimeoutError as e:
-            logger.error(f"CLI timeout: {e}")
-            return {"error": str(e), "type": "CLITimeoutError"}
-        except CLIExecutionError as e:
-            logger.error(f"CLI execution error: {e}")
-            return {"error": str(e), "type": "CLIExecutionError"}
+        # 실행할 로직 선택 (Session vs Stateless)
+        if session_id:
+            # Session 모드
+            logger.info(f"Session mode: {session_id} (resume: {resume})")
+            execution_func = functools.partial(
+                execute_with_session,
+                cli_name, message, session_id, resume,
+                skip_git_repo_check, system_prompt, args, timeout
+            )
+        else:
+            # Stateless 모드
+            logger.info("Stateless mode")
+            execution_func = functools.partial(
+                execute_cli_file_based,
+                cli_name, message, skip_git_repo_check, system_prompt, args, timeout
+            )
 
-    elif name == "start_send_message":
-        # 비동기 방식: TaskManager에 작업을 등록하고 task_id를 즉시 반환
-        task_manager = get_task_manager()
-        
-        # 실제 실행할 코루틴(또는 함수)을 준비
-        # functools.partial을 사용하여 나중에 실행될 함수와 인자를 묶음
-        import functools
-        coro = functools.partial(
-            execute_cli_file_based,
-            cli_name=arguments["cli_name"],
-            message=arguments["message"],
-            skip_git_repo_check=arguments.get("skip_git_repo_check", True),
-            system_prompt=arguments.get("system_prompt", None),
-            args=arguments.get("args", []),
-            timeout=arguments.get("timeout", None)
-        )
-        
-        task_id = await task_manager.start_task(coro)
-        return {"task_id": task_id}
+        # 비동기 실행 여부에 따른 분기
+        if run_async:
+            # 비동기 실행: TaskManager에 등록하고 ID 즉시 반환
+            task_manager = get_task_manager()
+            task_id = await task_manager.start_task(execution_func)
+            return {
+                "task_id": task_id,
+                "status": "running",
+                "message": "Task started asynchronously"
+            }
+        else:
+            # 동기 실행: 완료될 때까지 대기
+            try:
+                response = await asyncio.to_thread(execution_func)
+                return {"response": response}
+            except ValueError as e:
+                logger.error(f"Session validation error: {e}")
+                return {"error": str(e), "type": "SessionValidationError"}
+            except CLINotFoundError as e:
+                logger.error(f"CLI not found: {e}")
+                return {"error": str(e), "type": "CLINotFoundError"}
+            except CLITimeoutError as e:
+                logger.error(f"CLI timeout: {e}")
+                return {"error": str(e), "type": "CLITimeoutError"}
+            except CLIExecutionError as e:
+                logger.error(f"CLI execution error: {e}")
+                return {"error": str(e), "type": "CLIExecutionError"}
 
-    elif name == "get_task_status":
+    elif name == "get_run_status":
         task_id = arguments["task_id"]
         task_manager = get_task_manager()
         status = await task_manager.get_task_status(task_id)
         return status
         
-    elif name == "add_cli":
+    elif name == "add_tool":
         # 필수 필드
         cli_name = arguments["name"]
         command = arguments["command"]
@@ -322,7 +286,7 @@ def main():
     logger.info("AI CLI Ping-Pong MCP Server starting...")
     logger.info("MCP SDK version: 1.22.0")
     logger.info("Server name: ai-cli-mcp")
-    logger.info("Available tools: list_available_clis, send_message, add_cli")
+    logger.info("Available tools: list_tools, run_tool, get_run_status, add_tool")
 
     # stdio 서버 시작
     from mcp.server.stdio import stdio_server

@@ -4,7 +4,7 @@ MCP 서버가 Model Context Protocol 스펙을 올바르게 구현하는지 검�
 """
 
 import pytest
-from ai_cli_mcp.server import app, list_tools, call_tool
+from ai_cli_mcp.server import app, list_available_tools as list_tools, call_tool
 
 
 class TestMCPServerInitialization:
@@ -31,9 +31,9 @@ class TestListToolsHandler:
 
     @pytest.mark.asyncio
     async def test_list_tools_count(self):
-        """도구가 5개인지 확인 (list_available_clis, send_message, start_send_message, get_task_status, add_cli)"""
+        """도구가 4개인지 확인 (list_tools, run_tool, get_run_status, add_tool)"""
         tools = await list_tools()
-        assert len(tools) == 5
+        assert len(tools) == 4
 
     @pytest.mark.asyncio
     async def test_list_tools_schema_structure(self):
@@ -68,10 +68,10 @@ class TestListToolsHandler:
                 assert isinstance(schema["properties"], dict)
 
     @pytest.mark.asyncio
-    async def test_list_available_clis_tool_definition(self):
-        """list_available_clis 도구 정의 확인"""
+    async def test_list_tools_tool_definition(self):
+        """list_tools 도구 정의 확인"""
         tools = await list_tools()
-        list_clis_tool = next((t for t in tools if t.name == "list_available_clis"), None)
+        list_clis_tool = next((t for t in tools if t.name == "list_tools"), None)
 
         assert list_clis_tool is not None
         assert list_clis_tool.description == "설치된 AI CLI 목록 조회"
@@ -79,16 +79,16 @@ class TestListToolsHandler:
         assert list_clis_tool.inputSchema["properties"] == {}
 
     @pytest.mark.asyncio
-    async def test_send_message_tool_definition(self):
-        """send_message 도구 정의 확인"""
+    async def test_run_tool_tool_definition(self):
+        """run_tool 도구 정의 확인"""
         tools = await list_tools()
-        send_msg_tool = next((t for t in tools if t.name == "send_message"), None)
+        run_tool_def = next((t for t in tools if t.name == "run_tool"), None)
 
-        assert send_msg_tool is not None
-        assert send_msg_tool.description == "AI CLI에 메시지 전송 (동기 방식, 세션 모드 지원, 긴 작업 시 블로킹될 수 있음)"
+        assert run_tool_def is not None
+        assert "AI CLI 도구 실행" in run_tool_def.description
 
         # inputSchema 검증
-        schema = send_msg_tool.inputSchema
+        schema = run_tool_def.inputSchema
         assert schema["type"] == "object"
         assert "properties" in schema
         assert "required" in schema
@@ -96,10 +96,21 @@ class TestListToolsHandler:
         # properties 검증
         assert "cli_name" in schema["properties"]
         assert "message" in schema["properties"]
+        assert "run_async" in schema["properties"]
 
         # required 필드 검증
         assert "cli_name" in schema["required"]
         assert "message" in schema["required"]
+
+    @pytest.mark.asyncio
+    async def test_get_run_status_tool_definition(self):
+        """get_run_status 도구 정의 확인"""
+        tools = await list_tools()
+        status_tool = next((t for t in tools if t.name == "get_run_status"), None)
+
+        assert status_tool is not None
+        assert "비동기 실행" in status_tool.description
+        assert "task_id" in status_tool.inputSchema["properties"]
 
 
 class TestCallToolHandler:
@@ -122,8 +133,8 @@ class TestCallToolHandler:
     @pytest.mark.asyncio
     async def test_call_tool_returns_dict(self):
         """call_tool이 딕셔너리를 반환하는지 확인"""
-        # list_available_clis는 항상 성공
-        result = await call_tool("list_available_clis", {})
+        # list_tools는 항상 성공
+        result = await call_tool("list_tools", {})
         assert isinstance(result, dict)
 
 

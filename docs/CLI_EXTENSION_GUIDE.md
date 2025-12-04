@@ -4,15 +4,15 @@
 
 ---
 
-## 방법 1: 런타임 추가 (add_cli 도구)
+## 방법 1: 런타임 추가 (add_tool 도구)
 
-MCP 도구 `add_cli`를 사용하여 런타임에 CLI를 추가합니다.
+MCP 도구 `add_tool`를 사용하여 런타임에 CLI를 추가합니다.
 
 ### 사용 예시
 
 ```json
 {
-  "name": "add_cli",
+  "name": "add_tool",
   "arguments": {
     "name": "deepseek",
     "command": "deepseek"
@@ -24,7 +24,7 @@ MCP 도구 `add_cli`를 사용하여 런타임에 CLI를 추가합니다.
 
 ```json
 {
-  "name": "add_cli",
+  "name": "add_tool",
   "arguments": {
     "name": "deepseek",
     "command": "deepseek",
@@ -146,7 +146,7 @@ CLI_CONFIGS: dict[str, CLIConfig] = {
 3가지 방법으로 추가된 CLI는 다음 우선순위로 병합됩니다:
 
 ```
-런타임 (add_cli) > 파일 (custom_clis.json) > 기본 (config.py)
+런타임 (add_tool) > 파일 (custom_clis.json) > 기본 (config.py)
 ```
 
 **예시**: `deepseek`이 `config.py`와 `custom_clis.json`에 모두 있다면, `custom_clis.json`의 설정이 우선됩니다.
@@ -155,11 +155,11 @@ CLI_CONFIGS: dict[str, CLIConfig] = {
 
 ## 추가 후 확인
 
-CLI를 추가한 후 `list_available_clis` 도구로 확인합니다:
+CLI를 추가한 후 `list_tools` 도구로 확인합니다:
 
 ```json
 {
-  "name": "list_available_clis"
+  "name": "list_tools"
 }
 ```
 
@@ -182,11 +182,11 @@ CLI를 추가한 후 `list_available_clis` 도구로 확인합니다:
 
 ## 추가한 CLI 사용
 
-`send_message` 도구로 추가한 CLI를 사용합니다:
+`run_tool` 도구로 추가한 CLI를 사용합니다:
 
 ```json
 {
-  "name": "send_message",
+  "name": "run_tool",
   "arguments": {
     "cli_name": "deepseek",
     "message": "Write a hello world function"
@@ -232,7 +232,7 @@ CLI를 추가한 후 `list_available_clis` 도구로 확인합니다:
 
 | 방법 | 지속성 | 재시작 필요 | 용도 |
 |------|--------|-------------|------|
-| **add_cli** | 런타임만 | 재시작 시 사라짐 | 테스트, 임시 사용 |
+| **add_tool** | 런타임만 | 재시작 시 사라짐 | 테스트, 임시 사용 |
 | **custom_clis.json** | 영구 | 서버 재시작 | 프로젝트 공유 설정 |
 | **config.py** | 영구 | 서버 재시작 | 공식 지원 CLI |
 

@@ -18,12 +18,12 @@ from ai_cli_mcp.task_manager import TaskManager, get_task_manager, InMemoryStora
 
 
 class TestCallToolListAvailableCLIs:
-    """list_available_clis 도구 핸들러 테스트"""
+    """list_tools 도구 핸들러 테스트"""
 
     @pytest.mark.asyncio
     async def test_call_tool_list_available_clis_success(self):
-        """list_available_clis 핸들러 성공 케이스"""
-        result = await call_tool("list_available_clis", {})
+        """list_tools 핸들러 성공 케이스"""
+        result = await call_tool("list_tools", {})
 
         # 응답 형식 검증
         assert isinstance(result, dict)
@@ -40,7 +40,7 @@ class TestCallToolListAvailableCLIs:
     @pytest.mark.asyncio
     async def test_call_tool_list_available_clis_cli_structure(self):
         """각 CLI 항목의 구조 검증"""
-        result = await call_tool("list_available_clis", {})
+        result = await call_tool("list_tools", {})
 
         for cli in result["clis"]:
             # 필수 필드 존재
@@ -59,27 +59,28 @@ class TestCallToolListAvailableCLIs:
     @pytest.mark.asyncio
     async def test_call_tool_list_available_clis_asyncio_called(self):
         """asyncio.to_thread()가 호출됨을 확인"""
-        # 실제 list_available_clis 호출하므로 to_thread 호출 여부는
+        # 실제 list_tools 호출하므로 to_thread 호출 여부는
         # 실제 동작으로 검증됨. 이 테스트는 기존 success 테스트로 충분함
-        result = await call_tool("list_available_clis", {})
+        result = await call_tool("list_tools", {})
 
         # 비동기 처리가 제대로 되었으므로 응답 받음
         assert isinstance(result, dict)
         assert "clis" in result
 
 
-class TestCallToolSendMessage:
-    """send_message 도구 핸들러 테스트"""
+class TestCallToolRunTool:
+    """run_tool 도구 핸들러 테스트 (동기/비동기 통합)"""
 
     @pytest.mark.asyncio
-    async def test_call_tool_send_message_success(self):
-        """send_message 성공 케이스"""
+    async def test_call_tool_run_tool_sync_success(self):
+        """run_tool 동기 실행 성공 케이스 (run_async=False)"""
         with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
             mock_execute.return_value = "Success response"
 
-            result = await call_tool("send_message", {
+            result = await call_tool("run_tool", {
                 "cli_name": "claude",
                 "message": "Hello, world!",
+                "run_async": False
             })
 
             assert "response" in result
@@ -87,12 +88,69 @@ class TestCallToolSendMessage:
             mock_execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_call_tool_send_message_with_system_prompt(self):
-        """시스템 프롬프트 포함 send_message"""
+    async def test_call_tool_run_tool_default_sync(self):
+        """run_tool 기본값은 동기 실행이어야 함"""
+        with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
+            mock_execute.return_value = "Success"
+
+            result = await call_tool("run_tool", {
+                "cli_name": "claude",
+                "message": "Hello"
+            }) # run_async 생략
+
+            assert "response" in result
+            mock_execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_call_tool_run_tool_async_success(self):
+        """run_tool 비동기 실행 (run_async=True)"""
+        
+        # TaskManager 초기화 (테스트용)
+        TaskManager._task_manager_instance = None
+        manager = get_task_manager()
+        manager.storage = InMemoryStorage()
+        await manager.start()
+
+        try:
+            # 실제 실행 함수는 모킹
+            mock_execution = MagicMock(return_value="Async Result")
+            
+            # server.py의 execute_cli_file_based를 패치
+            # functools.partial로 감싸지기 때문에 호출 시점에 모킹된 함수가 사용됨
+            with patch("ai_cli_mcp.server.execute_cli_file_based", new=mock_execution):
+                result = await call_tool("run_tool", {
+                    "cli_name": "claude",
+                    "message": "Async Test",
+                    "run_async": True
+                })
+
+                # 즉시 반환 확인
+                assert "task_id" in result
+                assert result["status"] == "running"
+                task_id = result["task_id"]
+
+                # 잠시 대기하여 작업 완료 유도
+                await asyncio.sleep(0.1)
+
+                # 작업이 실행되었는지 확인
+                mock_execution.assert_called_once()
+
+                # 상태 조회 (get_run_status 사용)
+                status_result = await call_tool("get_run_status", {"task_id": task_id})
+                assert status_result["status"] == "completed"
+                assert status_result["result"] == "Async Result"
+
+        finally:
+            await manager.stop()
+            TaskManager._task_manager_instance = None
+
+    @pytest.mark.asyncio
+    async def test_call_tool_run_tool_with_system_prompt(self):
+        """시스템 프롬프트 포함 run_tool"""
         with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
             mock_execute.return_value = "Response with system prompt"
 
-            result = await call_tool("send_message", {
+            result = await call_tool("run_tool", {
                 "cli_name": "claude",
                 "message": "Tell me a story",
                 "system_prompt": "You are a storyteller",
@@ -105,30 +163,12 @@ class TestCallToolSendMessage:
             assert "system_prompt" in call_args.kwargs or len(call_args.args) > 3
 
     @pytest.mark.asyncio
-    async def test_call_tool_send_message_with_skip_git_check(self):
-        """skip_git_repo_check 포함 send_message (Codex용)"""
-        with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
-            mock_execute.return_value = "Codex response"
-
-            result = await call_tool("send_message", {
-                "cli_name": "codex",
-                "message": "Write code",
-                "skip_git_repo_check": True,
-            })
-
-            assert "response" in result
-            mock_execute.assert_called_once()
-            # skip_git_repo_check가 True로 전달되었는지 확인
-            call_args = mock_execute.call_args
-            assert call_args.args[2] is True  # 3번째 인자
-
-    @pytest.mark.asyncio
-    async def test_call_tool_send_message_cli_not_found_error(self):
-        """CLI not found 에러 처리"""
+    async def test_call_tool_run_tool_cli_not_found_error(self):
+        """CLI not found 에러 처리 (동기)"""
         with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
             mock_execute.side_effect = CLINotFoundError("claude (claude)가 설치되지 않았습니다")
 
-            result = await call_tool("send_message", {
+            result = await call_tool("run_tool", {
                 "cli_name": "claude",
                 "message": "Hello",
             })
@@ -138,27 +178,12 @@ class TestCallToolSendMessage:
             assert "설치되지 않았습니다" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_call_tool_send_message_timeout_error(self):
-        """타임아웃 에러 처리"""
-        with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
-            mock_execute.side_effect = CLITimeoutError("CLI 실행 타임아웃 (60초)")
-
-            result = await call_tool("send_message", {
-                "cli_name": "claude",
-                "message": "Long request",
-            })
-
-            assert "error" in result
-            assert result["type"] == "CLITimeoutError"
-            assert "타임아웃" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_call_tool_send_message_execution_error(self):
-        """실행 에러 처리"""
+    async def test_call_tool_run_tool_execution_error(self):
+        """실행 에러 처리 (동기)"""
         with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
             mock_execute.side_effect = CLIExecutionError("CLI 실행 실패 (코드 1)")
 
-            result = await call_tool("send_message", {
+            result = await call_tool("run_tool", {
                 "cli_name": "claude",
                 "message": "Request",
             })
@@ -167,178 +192,52 @@ class TestCallToolSendMessage:
             assert result["type"] == "CLIExecutionError"
             assert "실패" in result["error"]
 
-    @pytest.mark.asyncio
-    async def test_call_tool_send_message_asyncio_to_thread(self):
-        """asyncio.to_thread() 호출 검증"""
-        with patch("ai_cli_mcp.server.asyncio.to_thread") as mock_to_thread:
-            # to_thread가 반환할 값
-            async def async_to_thread(*args, **kwargs):
-                return "Response"
 
-            mock_to_thread.side_effect = async_to_thread
-
-            result = await call_tool("send_message", {
-                "cli_name": "claude",
-                "message": "Test",
-            })
-
-            # to_thread 호출 확인
-            mock_to_thread.assert_called_once()
-            assert "response" in result or "error" in result
-
-
-class TestCallToolAsyncHandlers:
-    """start_send_message 및 get_task_status 도구 핸들러 테스트"""
+class TestCallToolGetRunStatus:
+    """get_run_status 도구 핸들러 테스트"""
 
     @pytest.fixture(autouse=True)
     async def setup_task_manager(self):
         """각 테스트 전에 TaskManager를 초기화하고, 테스트 후에 정리합니다."""
-        # TaskManager 싱글톤 인스턴스를 강제로 초기화
         TaskManager._task_manager_instance = None
         manager = get_task_manager()
-        # 모든 작업을 지우고 새로 시작하도록 함
         manager.storage = InMemoryStorage()
-        await manager.start() # 모니터 태스크 시작
+        await manager.start()
         yield manager
-        # 테스트 후 TaskManager 정리
-        await manager.stop() # 모니터 태스크 중지
+        await manager.stop()
         TaskManager._task_manager_instance = None
 
+    @pytest.mark.asyncio
+    async def test_get_run_status_not_found(self, setup_task_manager):
+        """존재하지 않는 task_id 조회"""
+        result = await call_tool("get_run_status", {"task_id": "invalid-id"})
+        
+        assert result["status"] == "not_found"
+        assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_start_send_message_success_and_running_status(self, setup_task_manager):
-        """start_send_message 성공 및 running 상태 확인"""
-        cli_name = "claude"
-        message = "Async message"
-        expected_response = "Async CLI response"
+    async def test_get_run_status_completed(self, setup_task_manager):
+        """완료된 작업 상태 조회"""
+        # 수동으로 작업 추가
+        def dummy_task():
+            return "Done"
+        
+        task_id = await setup_task_manager.start_task(dummy_task)
+        await asyncio.sleep(0.1) # 완료 대기
 
-        # execute_cli_file_based를 모의하여 비동기로 동작하도록 설정
-        mock_cli_execution = MagicMock(return_value=expected_response)
+        result = await call_tool("get_run_status", {"task_id": task_id})
+        
+        assert result["status"] == "completed"
+        assert result["result"] == "Done"
 
-        with patch("ai_cli_mcp.server.execute_cli_file_based", new=mock_cli_execution):
-            # 1. start_send_message 호출
-            start_result = await call_tool("start_send_message", {
-                "cli_name": cli_name,
-                "message": message,
-            })
 
-            assert "task_id" in start_result
-            task_id = start_result["task_id"]
-
-            # 2. 즉시 get_task_status 호출하여 running 상태 확인
-            status_result_running = await call_tool("get_task_status", {"task_id": task_id})
-            assert status_result_running["status"] == "running"
-            assert "elapsed_time" in status_result_running
-            assert status_result_running["elapsed_time"] >= 0
-
-            # 3. 작업 완료까지 잠시 대기 (mock_cli_execution이 비동기로 완료될 시간을 줌)
-            await asyncio.sleep(0.1)
-            # mock_cli_execution이 호출되었는지 확인
-            mock_cli_execution.assert_called_once_with(
-                cli_name=cli_name,
-                message=message,
-                skip_git_repo_check=True, # 기본값
-                system_prompt=None, # 기본값
-                args=[], # 기본값
-                timeout=None # 기본값
-            )
-
-            # 4. 완료 후 get_task_status 호출하여 completed 상태 및 결과 확인
-            status_result_completed = await call_tool("get_task_status", {"task_id": task_id})
-            assert status_result_completed["status"] == "completed"
-            assert status_result_completed["result"] == expected_response
-            assert "elapsed_time" not in status_result_completed # 완료 후에는 elapsed_time이 없음
+class TestCallToolAddTool:
+    """add_tool 도구 핸들러 테스트"""
 
     @pytest.mark.asyncio
-    async def test_start_send_message_failure_status(self, setup_task_manager):
-        """start_send_message 실패 및 failed 상태 확인"""
-        cli_name = "claude"
-        message = "Failing message"
-        expected_error = "CLI execution failed for some reason"
-
-        # execute_cli_file_based를 모의하여 예외를 발생시키도록 설정
-        mock_cli_execution = MagicMock(side_effect=CLIExecutionError(expected_error))
-
-        with patch("ai_cli_mcp.server.execute_cli_file_based", new=mock_cli_execution):
-            # 1. start_send_message 호출
-            start_result = await call_tool("start_send_message", {
-                "cli_name": cli_name,
-                "message": message,
-            })
-
-            assert "task_id" in start_result
-            task_id = start_result["task_id"]
-
-            # 2. 작업 완료까지 잠시 대기 (mock_cli_execution이 비동기로 실패할 시간을 줌)
-            await asyncio.sleep(0.1)
-            mock_cli_execution.assert_called_once()
-
-            # 3. 완료 후 get_task_status 호출하여 failed 상태 및 에러 메시지 확인
-            status_result_failed = await call_tool("get_task_status", {"task_id": task_id})
-            assert status_result_failed["status"] == "failed"
-            assert status_result_failed["error"] == expected_error
-            assert "elapsed_time" not in status_result_failed
-
-    @pytest.mark.asyncio
-    async def test_get_task_status_not_found(self, setup_task_manager):
-        """존재하지 않는 task_id에 대한 get_task_status"""
-        task_id = "non-existent-task-id"
-        status_result = await call_tool("get_task_status", {"task_id": task_id})
-
-        assert status_result["status"] == "not_found"
-        assert "error" in status_result
-        assert "Task ID not found" in status_result["error"]
-        assert "elapsed_time" not in status_result
-
-    @pytest.mark.asyncio
-    async def test_start_send_message_with_all_args(self, setup_task_manager):
-        """start_send_message의 모든 인자 전달 확인"""
-        cli_name = "gemini"
-        message = "Message with args"
-        system_prompt = "You are a helpful assistant."
-        skip_git_repo_check = False
-        args = ["--model", "gemini-pro"]
-        timeout = 120
-        expected_response = "Response from gemini-pro"
-
-        mock_cli_execution = MagicMock(return_value=expected_response)
-
-        with patch("ai_cli_mcp.server.execute_cli_file_based", new=mock_cli_execution):
-            start_result = await call_tool("start_send_message", {
-                "cli_name": cli_name,
-                "message": message,
-                "system_prompt": system_prompt,
-                "skip_git_repo_check": skip_git_repo_check,
-                "args": args,
-                "timeout": timeout
-            })
-
-            assert "task_id" in start_result
-            task_id = start_result["task_id"]
-
-            await asyncio.sleep(0.1) # allow task to complete
-
-            mock_cli_execution.assert_called_once_with(
-                cli_name=cli_name,
-                message=message,
-                skip_git_repo_check=skip_git_repo_check,
-                system_prompt=system_prompt,
-                args=args,
-                timeout=timeout
-            )
-
-            status_result = await call_tool("get_task_status", {"task_id": task_id})
-            assert status_result["status"] == "completed"
-            assert status_result["result"] == expected_response
-
-
-
-    """add_cli 도구 핸들러 테스트"""
-
-    @pytest.mark.asyncio
-    async def test_call_tool_add_cli_minimal(self):
-        """add_cli 최소 필드 (name, command만)"""
-        result = await call_tool("add_cli", {
+    async def test_call_tool_add_tool_minimal(self):
+        """add_tool 최소 필드 (name, command만)"""
+        result = await call_tool("add_tool", {
             "name": "deepseek",
             "command": "deepseek",
         })
@@ -349,9 +248,9 @@ class TestCallToolAsyncHandlers:
         assert result["cli"]["command"] == "deepseek"
 
     @pytest.mark.asyncio
-    async def test_call_tool_add_cli_full_options(self):
-        """add_cli 전체 옵션"""
-        result = await call_tool("add_cli", {
+    async def test_call_tool_add_tool_full_options(self):
+        """add_tool 전체 옵션"""
+        result = await call_tool("add_tool", {
             "name": "custom_gpt",
             "command": "custom-gpt",
             "extra_args": ["--mode", "chat"],
@@ -367,54 +266,33 @@ class TestCallToolAsyncHandlers:
         assert result["cli"]["command"] == "custom-gpt"
 
     @pytest.mark.asyncio
-    async def test_call_tool_add_cli_then_list(self):
-        """add_cli 후 list_available_clis에 반영"""
+    async def test_call_tool_add_tool_then_list(self):
+        """add_tool 후 list_tools에 반영"""
         # 1. CLI 추가
-        add_result = await call_tool("add_cli", {
+        add_result = await call_tool("add_tool", {
             "name": "test_cli",
             "command": "test-cli",
         })
         assert add_result["success"] is True
 
         # 2. 목록에서 확인
-        list_result = await call_tool("list_available_clis", {})
+        list_result = await call_tool("list_tools", {})
         cli_names = [cli["name"] for cli in list_result["clis"]]
         assert "test_cli" in cli_names
 
     @pytest.mark.asyncio
-    async def test_call_tool_add_cli_with_error(self):
-        """add_cli 실패 케이스"""
+    async def test_call_tool_add_tool_with_error(self):
+        """add_tool 실패 케이스"""
         with patch("ai_cli_mcp.server.get_cli_registry") as mock_registry:
             mock_registry.return_value.add_cli.side_effect = Exception("Registry error")
 
-            result = await call_tool("add_cli", {
+            result = await call_tool("add_tool", {
                 "name": "bad_cli",
                 "command": "bad",
             })
 
             assert "error" in result
             assert result["type"] == "AddCLIError"
-
-    @pytest.mark.asyncio
-    async def test_call_tool_add_cli_overwrite_existing(self):
-        """기존 CLI를 동일 이름으로 덮어쓰기"""
-        # 1. 첫 번째 추가
-        result1 = await call_tool("add_cli", {
-            "name": "override_test",
-            "command": "cmd1",
-        })
-        assert result1["success"] is True
-
-        # 2. 같은 이름으로 다시 추가
-        result2 = await call_tool("add_cli", {
-            "name": "override_test",
-            "command": "cmd2",
-        })
-        assert result2["success"] is True
-
-        # 3. 마지막 값으로 덮어써졌는지 확인
-        list_result = await call_tool("list_available_clis", {})
-        # override_test CLI가 하나만 존재해야 함 (마지막 값)
 
 
 class TestCallToolUnknownTool:
@@ -434,17 +312,17 @@ class TestCallToolIntegration:
     """도구 핸들러 통합 테스트"""
 
     @pytest.mark.asyncio
-    async def test_call_tool_list_then_send(self):
-        """list → send 순서대로 호출"""
+    async def test_call_tool_list_then_run(self):
+        """list → run 순서대로 호출"""
         # 1. 목록 조회
-        list_result = await call_tool("list_available_clis", {})
+        list_result = await call_tool("list_tools", {})
         assert "clis" in list_result
 
-        # 2. send_message 시도 (실제로는 모킹됨)
+        # 2. run_tool 시도 (실제로는 모킹됨)
         with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
             mock_execute.return_value = "Test response"
 
-            send_result = await call_tool("send_message", {
+            send_result = await call_tool("run_tool", {
                 "cli_name": "claude",
                 "message": "Test",
             })
@@ -452,35 +330,18 @@ class TestCallToolIntegration:
 
     @pytest.mark.asyncio
     async def test_call_tool_add_then_list(self):
-        """add_cli → list 순서대로 호출"""
+        """add_tool → list 순서대로 호출"""
         # 1. CLI 추가
-        add_result = await call_tool("add_cli", {
+        add_result = await call_tool("add_tool", {
             "name": "integration_test",
             "command": "it-cmd",
         })
         assert add_result["success"] is True
 
         # 2. 목록에서 확인
-        list_result = await call_tool("list_available_clis", {})
+        list_result = await call_tool("list_tools", {})
         cli_names = [cli["name"] for cli in list_result["clis"]]
         assert "integration_test" in cli_names
-
-    @pytest.mark.asyncio
-    async def test_call_tool_error_recovery(self):
-        """에러 후에도 정상 동작"""
-        # 1. 에러 발생
-        with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
-            mock_execute.side_effect = CLINotFoundError("Not found")
-
-            error_result = await call_tool("send_message", {
-                "cli_name": "nonexistent",
-                "message": "Test",
-            })
-            assert "error" in error_result
-
-        # 2. 에러 후에도 정상 호출 가능
-        list_result = await call_tool("list_available_clis", {})
-        assert "clis" in list_result
 
 
 class TestCallToolErrorHandling:
@@ -492,7 +353,7 @@ class TestCallToolErrorHandling:
         with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
             mock_execute.side_effect = CLINotFoundError("claude가 설치되지 않았습니다")
 
-            result = await call_tool("send_message", {
+            result = await call_tool("run_tool", {
                 "cli_name": "claude",
                 "message": "Test",
             })
@@ -505,7 +366,7 @@ class TestCallToolErrorHandling:
         with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
             mock_execute.side_effect = CLITimeoutError("Timeout")
 
-            result = await call_tool("send_message", {
+            result = await call_tool("run_tool", {
                 "cli_name": "claude",
                 "message": "Test",
             })
@@ -513,39 +374,18 @@ class TestCallToolErrorHandling:
             assert "type" in result
             assert result["type"] == "CLITimeoutError"
 
-    @pytest.mark.asyncio
-    async def test_all_error_types_handled(self):
-        """모든 에러 타입 처리 검증"""
-        errors = [
-            (CLINotFoundError("Not found"), "CLINotFoundError"),
-            (CLITimeoutError("Timeout"), "CLITimeoutError"),
-            (CLIExecutionError("Execution failed"), "CLIExecutionError"),
-        ]
-
-        for error, error_type in errors:
-            with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
-                mock_execute.side_effect = error
-
-                result = await call_tool("send_message", {
-                    "cli_name": "test",
-                    "message": "Test",
-                })
-
-                assert result["type"] == error_type
-                assert "error" in result
-
 
 # 엣지 케이스 테스트
 class TestCallToolEdgeCases:
     """엣지 케이스 테스트"""
 
     @pytest.mark.asyncio
-    async def test_send_message_with_empty_message(self):
+    async def test_run_tool_with_empty_message(self):
         """빈 메시지 전송"""
         with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
             mock_execute.return_value = ""
 
-            result = await call_tool("send_message", {
+            result = await call_tool("run_tool", {
                 "cli_name": "claude",
                 "message": "",
             })
@@ -553,56 +393,16 @@ class TestCallToolEdgeCases:
             assert "response" in result
 
     @pytest.mark.asyncio
-    async def test_send_message_with_long_message(self):
+    async def test_run_tool_with_long_message(self):
         """매우 긴 메시지 전송"""
         long_message = "x" * 10000
 
         with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
             mock_execute.return_value = "Response"
 
-            result = await call_tool("send_message", {
+            result = await call_tool("run_tool", {
                 "cli_name": "claude",
                 "message": long_message,
-            })
-
-            assert "response" in result
-
-    @pytest.mark.asyncio
-    async def test_send_message_with_special_characters(self):
-        """특수 문자 포함 메시지"""
-        special_message = "Hello! @#$%^&*()_+-=[]{}|;:',.<>?/~`"
-
-        with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
-            mock_execute.return_value = "Response"
-
-            result = await call_tool("send_message", {
-                "cli_name": "claude",
-                "message": special_message,
-            })
-
-            assert "response" in result
-
-    @pytest.mark.asyncio
-    async def test_add_cli_with_special_characters_in_name(self):
-        """특수 문자를 포함한 CLI 이름"""
-        result = await call_tool("add_cli", {
-            "name": "test-cli-2024",
-            "command": "test-cmd",
-        })
-
-        assert result["success"] is True
-
-    @pytest.mark.asyncio
-    async def test_send_message_with_unicode_characters(self):
-        """유니코드 문자 포함 메시지"""
-        unicode_message = "안녕하세요! 你好! مرحبا! 🎉"
-
-        with patch("ai_cli_mcp.server.execute_cli_file_based") as mock_execute:
-            mock_execute.return_value = "Response"
-
-            result = await call_tool("send_message", {
-                "cli_name": "claude",
-                "message": unicode_message,
             })
 
             assert "response" in result

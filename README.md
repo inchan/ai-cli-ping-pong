@@ -7,11 +7,11 @@ MCP (Model Context Protocol) 서버로 로컬에 설치된 AI CLI 도구들과 *
 ## ✨ Features
 
 ### Core Features
-- ✅ **list_available_clis**: 설치된 AI CLI 도구 목록 조회
-- ✅ **send_message**: AI CLI에 메시지 보내고 응답 받기 (동기 방식)
-- ✅ **비동기 작업 실행**: `start_send_message`와 `get_task_status`를 통해 긴 작업을 백그라운드에서 처리
+- ✅ **list_tools**: 설치된 AI CLI 도구 목록 조회
+- ✅ **run_tool**: AI CLI에 메시지 보내고 응답 받기 (동기 방식)
+- ✅ **비동기 작업 실행**: `start_run_tool`와 `get_run_status`를 통해 긴 작업을 백그라운드에서 처리
 - ✅ **영속적 작업 저장소**: SQLite를 사용하여 서버가 재시작되어도 작업 상태 유지 (선택 사항)
-- ✅ **add_cli**: 런타임에 새로운 AI CLI 추가 (v2.0)
+- ✅ **add_tool**: 런타임에 새로운 AI CLI 추가 (v2.0)
 - ✅ **다양한 CLI 지원**: Claude, Gemini, Codex, Qwen 등 주요 AI 코딩 CLI 도구 지원
 
 ### v2.1 New: Session Mode 🎉
@@ -209,24 +209,24 @@ python -m ai_cli_mcp.server
 
 ### Available Tools (MCP)
 
-#### `list_available_clis`
+#### `list_tools`
 
 서버에 설정된 CLI 도구 목록과 설치 상태를 반환합니다.
 
 ```json
 {
-  "name": "list_available_clis"
+  "name": "list_tools"
 }
 ```
 
-#### `send_message`
+#### `run_tool`
 
 AI CLI에 메시지를 보내고 응답이 올 때까지 대기하는 **동기(Synchronous)** 방식입니다. 간단하고 빠른 작업에 적합합니다.
 
 **Stateless 모드 (기본)**:
 ```json
 {
-  "name": "send_message",
+  "name": "run_tool",
   "arguments": {
     "cli_name": "claude",
     "message": "Write a hello world function"
@@ -237,7 +237,7 @@ AI CLI에 메시지를 보내고 응답이 올 때까지 대기하는 **동기(S
 **Session 모드 (v2.1 NEW)** 🎉:
 ```json
 {
-  "name": "send_message",
+  "name": "run_tool",
   "arguments": {
     "cli_name": "claude",
     "message": "파일 20~30번 분석해줘",
@@ -249,7 +249,7 @@ AI CLI에 메시지를 보내고 응답이 올 때까지 대기하는 **동기(S
 **Session 이어가기**:
 ```json
 {
-  "name": "send_message",
+  "name": "run_tool",
   "arguments": {
     "cli_name": "claude",
     "message": "25번 파일은 몇 번째였지?",
@@ -259,39 +259,39 @@ AI CLI에 메시지를 보내고 응답이 올 때까지 대기하는 **동기(S
 }
 ```
 
-#### `start_send_message`
-
-긴 작업에 권장되는 **비동기(Asynchronous)** 방식입니다. 작업을 백그라운드에서 시작하고 즉시 `task_id`를 반환합니다.
+**비동기 모드 (Async Mode)**:
+긴 작업에 권장되는 방식입니다. `run_async: true`를 설정하면 작업을 백그라운드에서 시작하고 즉시 `task_id`를 반환합니다.
 
 ```json
 {
-  "name": "start_send_message",
+  "name": "run_tool",
   "arguments": {
     "cli_name": "claude",
-    "message": "Write a python script that analyzes a large CSV file."
+    "message": "Write a python script that analyzes a large CSV file.",
+    "run_async": true
   }
 }
 ```
 
-#### `get_task_status`
+#### `get_run_status`
 
-`start_send_message`로 시작된 비동기 작업의 상태를 조회합니다. 작업이 완료될 때까지 주기적으로 호출(polling)해야 합니다.
+비동기 모드(`run_async=true`)로 시작된 작업의 상태를 조회합니다. 작업이 완료될 때까지 주기적으로 호출(polling)해야 합니다.
 
 ```json
 {
-  "name": "get_task_status",
+  "name": "get_run_status",
   "arguments": {
     "task_id": "<your-task-id>"
   }
 }
 ```
 
-#### `add_cli`
+#### `add_tool`
 런타임에 새로운 AI CLI 설정을 동적으로 추가합니다.
 
 ```json
 {
-  "name": "add_cli",
+  "name": "add_tool",
   "arguments": {
     "name": "my-custom-cli",
     "command": "my-cli-command"
@@ -313,13 +313,13 @@ AI CLI에 메시지를 보내고 응답이 올 때까지 대기하는 **동기(S
 **세션 모드 예시**:
 ```python
 # 첫 요청: 분석 시작
-send_message(cli_name="claude", message="프로젝트 분석", session_id="proj-a")
+run_tool(cli_name="claude", message="프로젝트 분석", session_id="proj-a")
 
 # 후속 요청: 이전 분석 재사용
-send_message(cli_name="claude", message="버그는?", session_id="proj-a", resume=True)
+run_tool(cli_name="claude", message="버그는?", session_id="proj-a", resume=True)
 
 # 다른 세션: 동시 진행 가능
-send_message(cli_name="gemini", message="다른 작업", session_id="proj-b")
+run_tool(cli_name="gemini", message="다른 작업", session_id="proj-b")
 ```
 
 ## License

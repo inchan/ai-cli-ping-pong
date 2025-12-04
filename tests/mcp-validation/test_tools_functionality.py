@@ -99,13 +99,13 @@ class TestListAvailableCLIs:
             assert cli_info.version is None
 
 
-class TestListAvailableCLIsMCPTool:
-    """list_available_clis MCP 도구 통합 테스트"""
+class TestListToolsMCPTool:
+    """list_tools MCP 도구 통합 테스트"""
 
     @pytest.mark.asyncio
     async def test_call_tool_returns_dict_with_clis_key(self):
         """call_tool이 'clis' 키를 가진 딕셔너리를 반환하는지 확인"""
-        result = await call_tool("list_available_clis", {})
+        result = await call_tool("list_tools", {})
 
         assert isinstance(result, dict)
         assert "clis" in result
@@ -113,7 +113,7 @@ class TestListAvailableCLIsMCPTool:
     @pytest.mark.asyncio
     async def test_clis_value_is_list_of_dicts(self):
         """clis 값이 딕셔너리의 리스트인지 확인"""
-        result = await call_tool("list_available_clis", {})
+        result = await call_tool("list_tools", {})
 
         assert isinstance(result["clis"], list)
 
@@ -136,7 +136,7 @@ class TestListAvailableCLIsMCPTool:
         )
         mock_list_clis.return_value = [mock_cli]
 
-        result = await call_tool("list_available_clis", {})
+        result = await call_tool("list_tools", {})
 
         # Mock이 호출되었는지 확인
         mock_list_clis.assert_called_once()
@@ -145,15 +145,15 @@ class TestListAvailableCLIsMCPTool:
         assert result["clis"][0] == asdict(mock_cli)
 
 
-class TestSendMessageTool:
-    """send_message 도구 기능 테스트"""
+class TestRunTool:
+    """run_tool 도구 기능 테스트"""
 
     @pytest.mark.asyncio
     async def test_requires_cli_name_and_message(self):
         """cli_name과 message 파라미터가 필수인지 확인"""
         # 파라미터 없이 호출 시 KeyError 발생 예상
         with pytest.raises(KeyError):
-            await call_tool("send_message", {})
+            await call_tool("run_tool", {})
 
     @pytest.mark.asyncio
     @patch('ai_cli_mcp.server.execute_cli_file_based')  # server.py에서 import한 것을 패치
@@ -161,7 +161,7 @@ class TestSendMessageTool:
         """정상적인 메시지 전송 테스트"""
         mock_execute.return_value = "CLI response"
 
-        result = await call_tool("send_message", {
+        result = await call_tool("run_tool", {
             "cli_name": "claude",
             "message": "Hello"
         })
@@ -176,7 +176,7 @@ class TestSendMessageTool:
         """CLI가 없을 때 에러 처리 확인"""
         mock_execute.side_effect = CLINotFoundError("CLI not found")
 
-        result = await call_tool("send_message", {
+        result = await call_tool("run_tool", {
             "cli_name": "nonexistent",
             "message": "test"
         })
@@ -191,7 +191,7 @@ class TestSendMessageTool:
         """CLI 타임아웃 에러 처리 확인"""
         mock_execute.side_effect = CLITimeoutError("Timeout")
 
-        result = await call_tool("send_message", {
+        result = await call_tool("run_tool", {
             "cli_name": "claude",
             "message": "test"
         })
@@ -205,7 +205,7 @@ class TestSendMessageTool:
         """CLI 실행 에러 처리 확인"""
         mock_execute.side_effect = CLIExecutionError("Execution failed")
 
-        result = await call_tool("send_message", {
+        result = await call_tool("run_tool", {
             "cli_name": "claude",
             "message": "test"
         })

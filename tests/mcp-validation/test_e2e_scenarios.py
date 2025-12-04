@@ -9,7 +9,7 @@ import asyncio
 from dataclasses import asdict
 from typing import Dict, Any
 
-from ai_cli_mcp.server import call_tool, list_tools
+from ai_cli_mcp.server import call_tool, list_available_tools as list_tools
 from ai_cli_mcp.cli_manager import list_available_clis, CLIInfo
 from ai_cli_mcp.file_handler import CLINotFoundError, CLITimeoutError, CLIExecutionError
 
@@ -23,14 +23,15 @@ class TestE2EBasicWorkflow:
         # Step 1: 도구 목록 조회
         tools = await list_tools()
 
-        assert len(tools) == 5  # list_available_clis, send_message, start_send_message, get_task_status, add_cli
+        assert len(tools) == 4  # list_tools, run_tool, get_run_status, add_tool
         tool_names = {tool.name for tool in tools}
-        assert "list_available_clis" in tool_names
-        assert "send_message" in tool_names
-        assert "add_cli" in tool_names
+        assert "list_tools" in tool_names
+        assert "run_tool" in tool_names
+        assert "get_run_status" in tool_names
+        assert "add_tool" in tool_names
 
-        # Step 2: list_available_clis 도구 실행
-        result = await call_tool("list_available_clis", {})
+        # Step 2: list_tools 도구 실행
+        result = await call_tool("list_tools", {})
 
         assert "clis" in result
         assert isinstance(result["clis"], list)
@@ -47,7 +48,7 @@ class TestE2EBasicWorkflow:
     async def test_complete_cli_interaction_workflow(self):
         """시나리오: 전체 CLI 상호작용 워크플로우"""
         # Step 1: 사용 가능한 CLI 조회
-        clis_result = await call_tool("list_available_clis", {})
+        clis_result = await call_tool("list_tools", {})
         available_clis = clis_result["clis"]
 
         # Step 2: 설치된 CLI 찾기
@@ -62,7 +63,7 @@ class TestE2EBasicWorkflow:
         # Step 3: 설치된 CLI로 메시지 전송 (Mock 사용)
         # 주의: 실제 CLI 호출은 비용/시간이 들므로 선택적으로 실행
         # 실제 환경에서는 이 부분을 주석 해제하여 테스트
-        # result = await call_tool("send_message", {
+        # result = await call_tool("run_tool", {
         #     "cli_name": installed_cli["name"],
         #     "message": "Hello, this is a test."
         # })
@@ -76,7 +77,7 @@ class TestE2EErrorHandling:
     async def test_error_then_success_recovery(self):
         """시나리오: 에러 발생 → 정상 호출로 복구"""
         # Step 1: 존재하지 않는 CLI 호출 (에러 예상)
-        error_result = await call_tool("send_message", {
+        error_result = await call_tool("run_tool", {
             "cli_name": "nonexistent-cli-12345",
             "message": "test"
         })
@@ -85,7 +86,7 @@ class TestE2EErrorHandling:
         assert error_result["type"] == "CLINotFoundError"
 
         # Step 2: 정상 도구 호출 (복구 확인)
-        success_result = await call_tool("list_available_clis", {})
+        success_result = await call_tool("list_tools", {})
 
         assert "clis" in success_result
         assert isinstance(success_result["clis"], list)
@@ -105,7 +106,7 @@ class TestE2EErrorHandling:
         """시나리오: 필수 파라미터 누락"""
         # message 파라미터 누락
         with pytest.raises(KeyError):
-            await call_tool("send_message", {
+            await call_tool("run_tool", {
                 "cli_name": "claude"
                 # message 누락
             })
@@ -120,7 +121,7 @@ class TestE2EDataConsistency:
         # 3번 연속 호출
         results = []
         for _ in range(3):
-            result = await call_tool("list_available_clis", {})
+            result = await call_tool("list_tools", {})
             results.append(result)
 
         # 모든 결과가 동일한 CLI 개수를 반환
@@ -137,7 +138,7 @@ class TestE2EDataConsistency:
     @pytest.mark.asyncio
     async def test_cli_info_structure_consistency(self):
         """시나리오: CLI 정보 구조의 일관성"""
-        result = await call_tool("list_available_clis", {})
+        result = await call_tool("list_tools", {})
         clis = result["clis"]
 
         # 모든 CLI가 동일한 구조를 가져야 함
@@ -160,7 +161,7 @@ class TestE2EConfigValidation:
         """시나리오: 설정된 모든 CLI가 목록에 존재"""
         from ai_cli_mcp.config import CLI_CONFIGS
 
-        result = await call_tool("list_available_clis", {})
+        result = await call_tool("list_tools", {})
         returned_cli_names = {cli["name"] for cli in result["clis"]}
         configured_cli_names = set(CLI_CONFIGS.keys())
 
@@ -171,7 +172,7 @@ class TestE2EConfigValidation:
         """시나리오: CLI 명령어가 설정과 일치"""
         from ai_cli_mcp.config import CLI_CONFIGS
 
-        result = await call_tool("list_available_clis", {})
+        result = await call_tool("list_tools", {})
 
         for cli in result["clis"]:
             cli_name = cli["name"]
@@ -185,7 +186,7 @@ class TestE2EErrorMessages:
     @pytest.mark.asyncio
     async def test_cli_not_found_error_message_quality(self):
         """시나리오: CLI 미설치 에러 메시지 품질"""
-        result = await call_tool("send_message", {
+        result = await call_tool("run_tool", {
             "cli_name": "fake-cli-xyz",
             "message": "test"
         })
@@ -217,13 +218,13 @@ class TestE2EStateManagement:
         # 각 호출이 독립적이어야 함
 
         # Call 1: Error
-        await call_tool("send_message", {
+        await call_tool("run_tool", {
             "cli_name": "nonexistent",
             "message": "test"
         })
 
         # Call 2: Success - 이전 에러의 영향을 받지 않아야 함
-        result2 = await call_tool("list_available_clis", {})
+        result2 = await call_tool("list_tools", {})
         assert "clis" in result2
 
         # Call 3: Another error - 이전 성공의 영향을 받지 않아야 함
@@ -231,7 +232,7 @@ class TestE2EStateManagement:
         assert "error" in result3
 
         # Call 4: Success again
-        result4 = await call_tool("list_available_clis", {})
+        result4 = await call_tool("list_tools", {})
         assert "clis" in result4
 
         # Result 2와 Result 4가 동일해야 함 (상태 없음)
@@ -243,12 +244,12 @@ class TestE2EStateManagement:
         # 여러 도구를 교차로 호출
         results = []
 
-        results.append(await call_tool("list_available_clis", {}))
-        results.append(await call_tool("send_message", {
+        results.append(await call_tool("list_tools", {}))
+        results.append(await call_tool("run_tool", {
             "cli_name": "fake",
             "message": "test"
         }))
-        results.append(await call_tool("list_available_clis", {}))
+        results.append(await call_tool("list_tools", {}))
 
         # 첫 번째와 세 번째 호출 결과가 동일해야 함
         assert len(results[0]["clis"]) == len(results[2]["clis"])
@@ -262,11 +263,11 @@ class TestE2EPerformance:
 
     @pytest.mark.asyncio
     async def test_list_clis_response_time(self):
-        """시나리오: list_available_clis 응답 시간"""
+        """시나리오: list_tools 응답 시간"""
         import time
 
         start = time.time()
-        await call_tool("list_available_clis", {})
+        await call_tool("list_tools", {})
         elapsed = time.time() - start
 
         # 2초 이내 응답
@@ -278,7 +279,7 @@ class TestE2EPerformance:
         import time
 
         start = time.time()
-        await call_tool("send_message", {
+        await call_tool("run_tool", {
             "cli_name": "nonexistent",
             "message": "test"
         })
@@ -289,14 +290,14 @@ class TestE2EPerformance:
 
     @pytest.mark.asyncio
     async def test_concurrent_list_calls(self):
-        """시나리오: 동시 list_available_clis 호출"""
+        """시나리오: 동시 list_tools 호출"""
         import time
 
         start = time.time()
 
         # 5개 동시 호출
         tasks = [
-            call_tool("list_available_clis", {})
+            call_tool("list_tools", {})
             for _ in range(5)
         ]
         results = await asyncio.gather(*tasks)
@@ -319,14 +320,14 @@ class TestE2EIntegration:
         """시나리오: 전체 사용자 여정"""
         # 1. 사용 가능한 도구 확인
         tools = await list_tools()
-        assert len(tools) == 5  # list_available_clis, send_message, start_send_message, get_task_status, add_cli
+        assert len(tools) == 4  # list_tools, run_tool, get_run_status, add_tool
 
         # 2. CLI 목록 조회
-        clis_result = await call_tool("list_available_clis", {})
+        clis_result = await call_tool("list_tools", {})
         assert "clis" in clis_result
 
         # 3. 존재하지 않는 CLI로 테스트 (에러 예상)
-        error_result = await call_tool("send_message", {
+        error_result = await call_tool("run_tool", {
             "cli_name": "test-fake-cli",
             "message": "test"
         })
@@ -334,7 +335,7 @@ class TestE2EIntegration:
         assert error_result["type"] == "CLINotFoundError"
 
         # 4. 다시 CLI 목록 조회 (복구 확인)
-        clis_result2 = await call_tool("list_available_clis", {})
+        clis_result2 = await call_tool("list_tools", {})
         assert "clis" in clis_result2
         assert len(clis_result2["clis"]) == len(clis_result["clis"])
 
@@ -346,7 +347,7 @@ class TestE2EIntegration:
         assert "error" in r1
 
         # CLI not found
-        r2 = await call_tool("send_message", {
+        r2 = await call_tool("run_tool", {
             "cli_name": "fake",
             "message": "test"
         })
@@ -355,21 +356,21 @@ class TestE2EIntegration:
 
         # Missing parameter
         with pytest.raises(KeyError):
-            await call_tool("send_message", {"cli_name": "claude"})
+            await call_tool("run_tool", {"cli_name": "claude"})
 
         # 모든 에러 후에도 정상 작동
-        r3 = await call_tool("list_available_clis", {})
+        r3 = await call_tool("list_tools", {})
         assert "clis" in r3
 
 
 class TestE2EAddCLI:
-    """add_cli 도구 E2E 테스트"""
+    """add_tool 도구 E2E 테스트"""
 
     @pytest.mark.asyncio
     async def test_add_cli_minimal(self):
         """시나리오: 최소 필드로 CLI 추가"""
         # CLI 추가
-        result = await call_tool("add_cli", {
+        result = await call_tool("add_tool", {
             "name": "testcli",
             "command": "testcli-cmd"
         })
@@ -378,14 +379,14 @@ class TestE2EAddCLI:
         assert "testcli" in result["message"]
 
         # 추가된 CLI가 목록에 나타나는지 확인
-        list_result = await call_tool("list_available_clis", {})
+        list_result = await call_tool("list_tools", {})
         cli_names = {cli["name"] for cli in list_result["clis"]}
         assert "testcli" in cli_names
 
     @pytest.mark.asyncio
     async def test_add_cli_full_options(self):
         """시나리오: 전체 옵션으로 CLI 추가"""
-        result = await call_tool("add_cli", {
+        result = await call_tool("add_tool", {
             "name": "fullcli",
             "command": "fullcli-cmd",
             "extra_args": ["arg1", "arg2"],
@@ -398,26 +399,26 @@ class TestE2EAddCLI:
         assert result["success"] is True
 
         # CLI 목록에서 확인
-        list_result = await call_tool("list_available_clis", {})
+        list_result = await call_tool("list_tools", {})
         cli_names = {cli["name"] for cli in list_result["clis"]}
         assert "fullcli" in cli_names
 
     @pytest.mark.asyncio
     async def test_add_cli_then_use(self):
-        """시나리오: CLI 추가 후 send_message로 사용 시도"""
+        """시나리오: CLI 추가 후 run_tool로 사용 시도"""
         # 1. CLI 추가
-        await call_tool("add_cli", {
+        await call_tool("add_tool", {
             "name": "fakecli",
             "command": "fakecli-nonexistent"
         })
 
         # 2. 추가된 CLI 확인
-        list_result = await call_tool("list_available_clis", {})
+        list_result = await call_tool("list_tools", {})
         cli_names = {cli["name"] for cli in list_result["clis"]}
         assert "fakecli" in cli_names
 
-        # 3. send_message로 사용 시도 (실제로는 미설치되어 에러)
-        send_result = await call_tool("send_message", {
+        # 3. run_tool로 사용 시도 (실제로는 미설치되어 에러)
+        send_result = await call_tool("run_tool", {
             "cli_name": "fakecli",
             "message": "test"
         })
@@ -430,19 +431,19 @@ class TestE2EAddCLI:
     async def test_add_cli_overwrite_base(self):
         """시나리오: 기본 CLI를 런타임에 덮어쓰기"""
         # claude CLI의 원래 설정 확인
-        list_result1 = await call_tool("list_available_clis", {})
+        list_result1 = await call_tool("list_tools", {})
         original_claude = next(
             cli for cli in list_result1["clis"] if cli["name"] == "claude"
         )
 
         # claude를 다른 명령어로 덮어쓰기
-        await call_tool("add_cli", {
+        await call_tool("add_tool", {
             "name": "claude",
             "command": "claude-modified"
         })
 
         # 덮어쓰기 확인
-        list_result2 = await call_tool("list_available_clis", {})
+        list_result2 = await call_tool("list_tools", {})
         modified_claude = next(
             cli for cli in list_result2["clis"] if cli["name"] == "claude"
         )
@@ -455,14 +456,14 @@ class TestE2EAddCLI:
         """시나리오: 여러 CLI를 순차적으로 추가"""
         # 3개 CLI 추가
         for i in range(1, 4):
-            result = await call_tool("add_cli", {
+            result = await call_tool("add_tool", {
                 "name": f"cli{i}",
                 "command": f"cli{i}-cmd"
             })
             assert result["success"] is True
 
         # 모두 목록에 나타나는지 확인
-        list_result = await call_tool("list_available_clis", {})
+        list_result = await call_tool("list_tools", {})
         cli_names = {cli["name"] for cli in list_result["clis"]}
 
         assert "cli1" in cli_names

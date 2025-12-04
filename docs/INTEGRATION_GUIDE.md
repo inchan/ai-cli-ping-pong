@@ -83,14 +83,14 @@
 1. Claude Code 재시작
 2. MCP 상태 확인:
    ```
-   - Tools 탭에 "list_available_clis", "send_message" 표시
+   - Tools 탭에 "list_tools", "run_tool" 표시
    ```
 
 #### 테스트 메시지
 
 Claude Code에서:
 ```
-MCP 서버가 연결되었나요? list_available_clis 도구를 사용해서 확인해주세요.
+MCP 서버가 연결되었나요? list_tools 도구를 사용해서 확인해주세요.
 ```
 
 **예상 응답**:
@@ -190,9 +190,9 @@ npx @modelcontextprotocol/inspector ./venv/bin/python -m ai_cli_mcp.server
 ### 3.3 테스트 체크리스트
 
 - [ ] 서버 연결 확인
-- [ ] 2개 도구 표시 (list_available_clis, send_message)
-- [ ] list_available_clis 호출 성공
-- [ ] send_message 호출 성공 (설치된 CLI)
+- [ ] 2개 도구 표시 (list_tools, run_tool)
+- [ ] list_tools 호출 성공
+- [ ] run_tool 호출 성공 (설치된 CLI)
 - [ ] 프로토콜 검증 통과
 
 ---
@@ -231,13 +231,13 @@ async def main():
             tools = await session.list_tools()
             print(f"Available tools: {tools}")
 
-            # list_available_clis 호출
-            result = await session.call_tool("list_available_clis", {})
+            # list_tools 호출
+            result = await session.call_tool("list_tools", {})
             print(f"CLIs: {result}")
 
-            # send_message 호출
+            # run_tool 호출
             result = await session.call_tool(
-                "send_message",
+                "run_tool",
                 {
                     "cli_name": "claude",
                     "message": "Hello!"
@@ -285,16 +285,16 @@ async function main() {
   const tools = await client.listTools();
   console.log("Available tools:", tools);
 
-  // list_available_clis 호출
+  // list_tools 호출
   const clis = await client.callTool({
-    name: "list_available_clis",
+    name: "list_tools",
     arguments: {}
   });
   console.log("CLIs:", clis);
 
-  // send_message 호출
+  // run_tool 호출
   const response = await client.callTool({
-    name: "send_message",
+    name: "run_tool",
     arguments: {
       cli_name: "claude",
       message: "Hello!"
@@ -552,8 +552,8 @@ fd = os.open(input_path, os.O_CREAT | os.O_WRONLY, 0o600)
 - 무상태 서버 (각 요청 독립)
 
 **성능 메트릭**:
-- list_available_clis: <1초
-- send_message (에러): <0.5초
+- list_tools: <1초
+- run_tool (에러): <0.5초
 - 동시 5개 요청: <5초
 
 ### 8.2 캐싱 (선택)
@@ -593,8 +593,8 @@ def get_cli_version(command: str) -> Optional[str]:
 - [ ] 서버 직접 실행 테스트
 - [ ] MCP Inspector 연결 테스트
 - [ ] 2개 도구 표시 확인
-- [ ] list_available_clis 호출 성공
-- [ ] send_message 호출 성공 (설치된 CLI)
+- [ ] list_tools 호출 성공
+- [ ] run_tool 호출 성공 (설치된 CLI)
 
 ### 9.4 프로덕션 준비
 
@@ -607,11 +607,11 @@ def get_cli_version(command: str) -> Optional[str]:
 
 ## Part 10: 비동기 워크플로우 활용 (Leveraging Asynchronous Workflow)
 
-`send_message`는 간단하지만, 응답이 올 때까지 클라이언트를 차단합니다. 코드 생성이나 데이터 분석처럼 몇 분씩 걸릴 수 있는 긴 작업을 처리하기 위해, 비동기 워크플로우를 사용하는 것이 강력히 권장됩니다.
+`run_tool`는 간단하지만, 응답이 올 때까지 클라이언트를 차단합니다. 코드 생성이나 데이터 분석처럼 몇 분씩 걸릴 수 있는 긴 작업을 처리하기 위해, 비동기 워크플로우를 사용하는 것이 강력히 권장됩니다.
 
 **핵심 흐름**:
-1.  `start_send_message`를 호출하여 작업을 시작하고 즉시 `task_id`를 받습니다.
-2.  `get_task_status`를 주기적으로 호출(polling)하여 작업 상태를 확인합니다.
+1.  `start_run_tool`를 호출하여 작업을 시작하고 즉시 `task_id`를 받습니다.
+2.  `get_run_status`를 주기적으로 호출(polling)하여 작업 상태를 확인합니다.
 3.  상태가 `completed` 또는 `failed`가 되면 폴링을 멈추고 결과를 처리합니다.
 
 ### Python 클라이언트 비동기 예제
@@ -635,7 +635,7 @@ async def main():
             # 1. 비동기 작업 시작
             print("Starting a long-running task...")
             start_result = await session.call_tool(
-                "start_send_message",
+                "start_run_tool",
                 {
                     "cli_name": "claude",
                     "message": "Analyze the provided data and generate a 300-line summary report."
@@ -651,7 +651,7 @@ async def main():
             # 2. 작업 완료까지 상태 폴링
             while True:
                 status_result = await session.call_tool(
-                    "get_task_status",
+                    "get_run_status",
                     {"task_id": task_id}
                 )
                 
@@ -745,7 +745,7 @@ if __name__ == "__main__":
 
 ## 부록 B: API 참조
 
-### list_available_clis
+### list_tools
 
 **설명**: 설치된 AI CLI 도구 목록을 조회합니다.
 
@@ -771,7 +771,7 @@ if __name__ == "__main__":
 }
 ```
 
-### send_message
+### run_tool
 
 **설명**: 지정한 AI CLI에 메시지를 전송하고 응답을 받습니다.
 
@@ -790,7 +790,7 @@ if __name__ == "__main__":
 **Codex 사용 예시**:
 ```json
 {
-  "name": "send_message",
+  "name": "run_tool",
   "arguments": {
     "cli_name": "codex",
     "message": "Write a fibonacci function",

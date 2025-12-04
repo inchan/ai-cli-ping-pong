@@ -13,7 +13,7 @@
 
 ## Architecture
 The data flow follows this path:
-1.  **MCP Client:** Sends a request (e.g., `send_message`) via JSON-RPC over stdio.
+1.  **MCP Client:** Sends a request (e.g., `run_tool`) via JSON-RPC over stdio.
 2.  **MCP Server (`ai_cli_mcp`):** Receives the request and validates it.
 3.  **File Handler:** Writes the message to a temporary input file.
 4.  **CLI Execution:** The server executes the target CLI tool, pointing it to the input file.
@@ -83,10 +83,10 @@ pytest tests/mcp-validation/ -v
 - **Gemini Context:** Use `GEMINI.md` (this file) to understand the project context.
 
 ## Available Tools (MCP)
-1.  `list_available_clis`: Returns a list of installed and configured AI CLI tools.
-2.  `send_message`: Sends a prompt to a specific CLI.
+1.  `list_tools`: Returns a list of installed and configured AI CLI tools.
+2.  `run_tool`: Sends a prompt to a specific CLI.
     - Args: `cli_name` (str), `message` (str), `system_prompt` (optional), `skip_git_repo_check` (optional bool), `args` (optional list).
-3.  `add_cli`: Dynamically adds a new CLI tool configuration at runtime.
+3.  `add_tool`: Dynamically adds a new CLI tool configuration at runtime.
 
 ## Critical Rules for AI Agents
 1.  **Do not break existing tests:** Run `pytest` after any modification.

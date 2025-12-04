@@ -22,7 +22,7 @@
 
 ## 주요 기능
 
-### 1. list_available_clis
+### 1. list_tools
 **설명**: 시스템에 설치된 AI CLI 목록 조회
 
 **기능**:
@@ -33,7 +33,7 @@
 **사용 예시**:
 ```json
 {
-  "name": "list_available_clis"
+  "name": "list_tools"
 }
 ```
 
@@ -51,7 +51,7 @@
 }
 ```
 
-### 2. send_message
+### 2. run_tool
 **설명**: AI CLI에 메시지 전송 및 응답 수신
 
 **기능**:
@@ -63,7 +63,7 @@
 **사용 예시**:
 ```json
 {
-  "name": "send_message",
+  "name": "run_tool",
   "arguments": {
     "cli_name": "claude",
     "message": "Write a hello world function"
@@ -74,7 +74,7 @@
 **Codex 특수 옵션**:
 ```json
 {
-  "name": "send_message",
+  "name": "run_tool",
   "arguments": {
     "cli_name": "codex",
     "message": "Write a hello world function",
@@ -83,7 +83,7 @@
 }
 ```
 
-### 3. add_cli (NEW ✨)
+### 3. add_tool (NEW ✨)
 **설명**: 런타임에 새로운 AI CLI 동적 추가
 
 **기능**:
@@ -94,7 +94,7 @@
 **최소 사용 예시**:
 ```json
 {
-  "name": "add_cli",
+  "name": "add_tool",
   "arguments": {
     "name": "deepseek",
     "command": "deepseek"
@@ -105,7 +105,7 @@
 **전체 옵션 예시**:
 ```json
 {
-  "name": "add_cli",
+  "name": "add_tool",
   "arguments": {
     "name": "custom_gpt",
     "command": "custom-gpt",
@@ -145,7 +145,7 @@
 
 ### 커스텀 CLI 추가 (3가지 방법)
 
-1. **런타임 추가** (`add_cli` 도구) - 재시작 불필요, 테스트용
+1. **런타임 추가** (`add_tool` 도구) - 재시작 불필요, 테스트용
 2. **파일 기반** (`custom_clis.json`) - 프로젝트 공유 설정
 3. **코드 추가** (`config.py`) - 공식 지원 CLI
 
@@ -188,7 +188,7 @@ python -m ai_cli_mcp.server
 
 **구현된 기능**:
 - MCP 프로토콜 완전 준수
-- 2개 MCP 도구 (list_available_clis, send_message)
+- 2개 MCP 도구 (list_tools, run_tool)
 - 4개 AI CLI 지원
 - 환경 변수 지원
 - Git 저장소 체크 스킵 (Codex)
