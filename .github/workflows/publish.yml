@@ -25,10 +25,13 @@ jobs:
       - name: Run tests
         run: pytest --cov=src
 
-  # PyPI 배포
+  # PyPI 배포 (Trusted Publisher)
   publish-pypi:
     needs: test
     runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -41,19 +44,15 @@ jobs:
       - name: Install build tools
         run: |
           python -m pip install --upgrade pip
-          pip install build twine
+          pip install build
 
       - name: Build package
         run: python -m build
 
-      - name: Check package
-        run: twine check dist/*
-
       - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: twine upload --skip-existing dist/*
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
 
   # GitHub Release 생성
   create-release:
