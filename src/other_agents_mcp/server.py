@@ -383,6 +383,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]):
 
 def main():
     """메인 함수"""
+    import signal
+    import sys
+
     logger.info("Other Agents MCP Server starting...")
     logger.info("MCP SDK version: 1.22.0")
     logger.info("Server name: other-agents-mcp")
@@ -391,13 +394,24 @@ def main():
     # 시작 시 오래된 임시 파일 정리
     cleanup_stale_temp_files()
 
-    # stdio 서버 시작
+    # 시그널 핸들러 설정
+    def signal_handler(sig, frame):
+        logger.info("Shutting down...")
+        sys.exit(0)
 
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # stdio 서버 시작
     async def run():
         async with stdio_server() as (read_stream, write_stream):
             await app.run(read_stream, write_stream, app.create_initialization_options())
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+        sys.exit(0)
 
 
 if __name__ == "__main__":
