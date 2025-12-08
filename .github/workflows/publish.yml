@@ -55,45 +55,11 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # Trusted Publisher 사용 (권장)
-          # 또는 password: ${{ secrets.PYPI_TOKEN }}
           skip-existing: true
-
-  # Docker Hub 배포
-  publish-docker:
-    needs: test
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/other-agents-mcp:${{ steps.version.outputs.VERSION }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/other-agents-mcp:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
   # GitHub Release 생성
   create-release:
-    needs: [publish-pypi, publish-docker]
+    needs: publish-pypi
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -112,19 +78,19 @@ jobs:
           body: |
             ## Installation
 
-            ### PyPI (권장)
+            ### PyPI
             ```bash
             pip install other-agents-mcp==${{ steps.version.outputs.VERSION }}
-            # 또는
+            # or
             uvx other-agents-mcp
             ```
 
-            ### Docker
+            ### Smithery
             ```bash
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/other-agents-mcp:${{ steps.version.outputs.VERSION }}
+            npx @smithery/cli install other-agents-mcp --client claude
             ```
 
-            ### Claude Desktop 설정
+            ### Claude Desktop Configuration
             ```json
             {
               "mcpServers": {
