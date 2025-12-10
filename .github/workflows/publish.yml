@@ -29,6 +29,7 @@ jobs:
   publish-pypi:
     needs: test
     runs-on: ubuntu-latest
+    environment: pypi
     permissions:
       id-token: write
 
