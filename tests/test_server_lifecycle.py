@@ -4,7 +4,7 @@
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from other_agents_mcp.server import app, main
 
