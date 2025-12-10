@@ -86,7 +86,7 @@ class CLIRegistry:
         """
         cli_config: CLIConfig = {
             "command": command,
-            "timeout": timeout if timeout is not None else 300,
+            "timeout": timeout if timeout is not None else 1800,
             "extra_args": extra_args if extra_args is not None else [],
             "env_vars": env_vars if env_vars is not None else {},
             "supports_skip_git_check": (
@@ -148,7 +148,7 @@ class CLIRegistry:
         """설정에 기본값 적용"""
         return {
             "command": config["command"],
-            "timeout": config.get("timeout", 300),
+            "timeout": config.get("timeout", 1800),
             "extra_args": config.get("extra_args", []),
             "env_vars": config.get("env_vars", {}),
             "supports_skip_git_check": config.get("supports_skip_git_check", False),
