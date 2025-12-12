@@ -104,7 +104,7 @@ async def list_available_tools():
                     },
                     "timeout": {
                         "type": "number",
-                        "description": "타임아웃 초 (선택사항, 기본값: 300). Stateless/Session 모드 모두 지원",
+                        "description": "타임아웃 초 (선택사항, 기본값: 1800). Stateless/Session 모드 모두 지원",
                     },
                 },
                 "required": ["cli_name", "message"],
@@ -135,7 +135,7 @@ async def list_available_tools():
                     },
                     "timeout": {
                         "type": "number",
-                        "description": "각 CLI의 타임아웃 초 (선택사항, 기본값: 300)",
+                        "description": "각 CLI의 타임아웃 초 (선택사항, 기본값: 1800)",
                     },
                 },
                 "required": ["message"],
@@ -143,11 +143,15 @@ async def list_available_tools():
         ),
         Tool(
             name="get_task_status",
-            description="비동기 실행(use_agent run_async=true)의 상태 및 결과를 조회합니다.",
+            description="비동기 실행(use_agent run_async=true)의 상태 및 결과를 조회합니다. timeout을 설정하면 완료될 때까지 대기합니다(Long Polling).",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "task_id": {"type": "string", "description": "use_agent로부터 받은 작업 ID"}
+                    "task_id": {"type": "string", "description": "use_agent로부터 받은 작업 ID"},
+                    "timeout": {
+                        "type": "number",
+                        "description": "상태가 running일 경우 대기할 최대 시간 (초). 설정 시 Long Polling으로 동작하여 폴링 횟수를 줄일 수 있습니다. (권장: 30)",
+                    },
                 },
                 "required": ["task_id"],
             },
@@ -321,8 +325,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]):
 
     elif name == "get_task_status":
         task_id = arguments["task_id"]
+        timeout = arguments.get("timeout", 0)
         task_manager = get_task_manager()
-        status = await task_manager.get_task_status(task_id)
+        status = await task_manager.get_task_status(task_id, timeout=timeout)
         return status
 
     elif name == "add_agent":

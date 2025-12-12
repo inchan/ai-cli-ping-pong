@@ -11,6 +11,12 @@ from typing import Literal, Optional, Any, Dict
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 
+from . import config
+from .logger import get_logger
+from .file_handler import get_cli_semaphore
+
+logger = get_logger(__name__)
+
 
 # 작업 상태 정의
 TaskStatus = Literal["running", "completed", "failed", "not_found"]
@@ -91,8 +97,12 @@ class TaskManager:
     async def start(self):
         """Task Manager를 시작하고 주기적인 정리 작업을 스케줄링합니다."""
         # SQLite 사용 시, 시작할 때 'running' 상태의 작업을 복구
-        if isinstance(self._storage, SqliteStorage):
-            await self._storage.recover_tasks()
+        try:
+            from .sqlite_storage import SqliteStorage
+            if isinstance(self._storage, SqliteStorage):
+                await self._storage.recover_tasks()
+        except ImportError:
+            pass  # Should not happen if configured correctly
 
         if self._cleanup_task is None:
             self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
@@ -141,7 +151,10 @@ class TaskManager:
         """비동기 코루틴을 실행하고 결과를 저장소에 업데이트합니다."""
         task_id = task.task_id
         try:
-            result = await coro
+            # 세마포어를 사용하여 동시 실행 수 제한
+            async with get_cli_semaphore():
+                result = await coro
+            
             task.status = "completed"
             task.result = result
         except Exception as e:
@@ -156,9 +169,11 @@ class TaskManager:
         """코루틴을 실행하고 결과를 저장소에 업데이트합니다."""
         task_id = task.task_id
         try:
-            # functools.partial로 감싸진 동기 함수를 스레드에서 실행
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(None, coro_func)
+            # 세마포어를 사용하여 동시 실행 수 제한
+            async with get_cli_semaphore():
+                # functools.partial로 감싸진 동기 함수를 스레드에서 실행
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(None, coro_func)
 
             task.status = "completed"
             task.result = result
@@ -170,11 +185,37 @@ class TaskManager:
             await self._storage.update_task(task)
             self._running_tasks.pop(task_id, None)
 
-    async def get_task_status(self, task_id: str) -> Dict[str, Any]:
-        """task_id로 작업 상태를 조회합니다."""
+    async def get_task_status(self, task_id: str, timeout: float = 0.0) -> Dict[str, Any]:
+        """task_id로 작업 상태를 조회합니다.
+        
+        Args:
+            task_id: 작업 ID
+            timeout: 상태가 running일 경우 대기할 최대 시간 (초). 0이면 즉시 반환.
+        """
         task = await self._storage.get_task(task_id)
         if not task:
             return {"status": "not_found", "error": "Task ID not found or expired."}
+
+        # Long-polling: 작업이 진행 중이고 timeout이 설정된 경우 대기
+        if task.status == "running" and timeout > 0:
+            if task_id in self._running_tasks:
+                try:
+                    # 실제 asyncio 태스크가 완료될 때까지 대기
+                    # shield를 사용하여 대기 중 취소되어도 원본 태스크는 유지
+                    await asyncio.wait_for(
+                        asyncio.shield(self._running_tasks[task_id]), 
+                        timeout=timeout
+                    )
+                    # 대기 후 상태 다시 조회
+                    task = await self._storage.get_task(task_id)
+                    # task가 없을 수 있음 (극히 드문 경우)
+                    if not task:
+                        return {"status": "not_found", "error": "Task disappeared after wait."}
+                except asyncio.TimeoutError:
+                    # 타임아웃: 현재 상태(running) 그대로 반환
+                    pass
+                except Exception as e:
+                    logger.error(f"Error waiting for task {task_id}: {e}")
 
         response: Dict[str, Any] = {"status": task.status}
         if task.status == "running":
@@ -200,13 +241,6 @@ class TaskManager:
                             self._storage._tasks.pop(task.task_id, None)
 
 
-from .sqlite_storage import SqliteStorage
-from . import config
-from .logger import get_logger
-
-logger = get_logger(__name__)
-
-
 # 싱글톤 인스턴스
 _task_manager_instance: Optional[TaskManager] = None
 
@@ -217,6 +251,7 @@ def get_task_manager() -> TaskManager:
     if _task_manager_instance is None:
         if config.STORAGE_TYPE == "sqlite":
             logger.info(f"Using SqliteStorage at: {config.SQLITE_DB_PATH}")
+            from .sqlite_storage import SqliteStorage
             storage: Storage = SqliteStorage(db_path=config.SQLITE_DB_PATH)
         else:
             logger.info("Using InMemoryStorage")
