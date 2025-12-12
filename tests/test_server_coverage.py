@@ -1,7 +1,7 @@
 """Tests for increasing code coverage of server.py"""
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 from other_agents_mcp.server import call_tool
 from other_agents_mcp.file_handler import CLINotFoundError, CLITimeoutError, CLIExecutionError
 
@@ -70,3 +70,20 @@ class TestServerCoverage:
 
             main()
             mock_run.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_call_tool_get_task_status_with_timeout(self):
+        """call_tool (get_task_status) timeout 파라미터 전달 테스트"""
+        with patch("other_agents_mcp.server.get_task_manager") as mock_get_mgr:
+            mock_mgr = mock_get_mgr.return_value
+            mock_mgr.get_task_status = AsyncMock(return_value={"status": "running"})
+
+            # timeout 지정 호출
+            await call_tool("get_task_status", {"task_id": "t1", "timeout": 30})
+            
+            mock_mgr.get_task_status.assert_called_with("t1", timeout=30)
+
+            # timeout 미지정 호출 (기본값 0)
+            await call_tool("get_task_status", {"task_id": "t2"})
+            
+            mock_mgr.get_task_status.assert_called_with("t2", timeout=0)

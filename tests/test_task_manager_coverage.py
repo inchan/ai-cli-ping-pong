@@ -9,8 +9,8 @@ from other_agents_mcp.task_manager import (
     InMemoryStorage,
     Task,
     get_task_manager,
-    SqliteStorage,
 )
+from other_agents_mcp.sqlite_storage import SqliteStorage
 from other_agents_mcp import config
 
 
@@ -116,6 +116,30 @@ class TestTaskManagerCoverage:
         status = await manager.get_task_status("run-task")
         assert status["status"] == "running"
         assert status["elapsed_time"] > 0
+
+    @pytest.mark.asyncio
+    async def test_get_task_status_long_polling(self, manager):
+        """get_task_status: timeout(long polling) 테스트"""
+        
+        # 1. 1초 뒤에 끝나는 작업 시작
+        async def slow_task():
+            await asyncio.sleep(1.0)
+            return "finished"
+
+        task_id = await manager.start_async_task(slow_task())
+        
+        # 2. Timeout 0.5초로 호출 -> 여전히 running이어야 함 (0.5초 대기 후 반환)
+        start_time = time.time()
+        status = await manager.get_task_status(task_id, timeout=0.5)
+        elapsed = time.time() - start_time
+        
+        assert status["status"] == "running"
+        assert 0.4 < elapsed < 0.7  # 대략 0.5초 대기했는지 확인
+
+        # 3. Timeout 1.5초(잔여 시간)로 호출 -> completed 반환
+        status_done = await manager.get_task_status(task_id, timeout=1.5)
+        assert status_done["status"] == "completed"
+        assert status_done["result"] == "finished"
 
     @pytest.mark.asyncio
     async def test_singleton_getter(self):
